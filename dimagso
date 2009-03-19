@@ -2,14 +2,172 @@
 ##
 ## Dimagso - A tool to sort digital images
 ##
-## Time-stamp: <2009-03-18 18:02:09 szi>
+## Time-stamp: <2009-03-19 18:42:52 szi>
 ##
 ## Sascha Ziemann <ceving@gmail.com>
 ##
 
+
+
+package Config;
 use strict;
-use Gtk2 -init;
-use Gtk2::SimpleList;
+
+sub new
+{
+    my $class = shift;
+    my %args  = @_;
+    my $self  = {};
+    
+    foreach (qw(tree filename)) 
+    {
+	$self->{uc $_} = $args{$_};
+    }
+
+    bless $self, $class;
+    return $self;
+}
+
+#
+# Traverse the whole configuration tree and apply action to each leaf.
+#
+sub traverse
+{
+    my $self = shift;
+    my ($action) = @_;
+
+    my $rec_traverse;
+
+    # nested functions are globally visible so we use an anonymous
+    # function.
+    $rec_traverse = sub 
+    {
+	my ($tree, $path) = @_;
+	
+	foreach my $key (sort keys %$tree)
+	{
+	    if (ref($tree->{$key}) eq 'HASH') {
+		&$rec_traverse ($tree->{$key}, [@$path, $key]);
+	    } else {
+		&$action ([@$path, $key], $tree->{$key}); 
+	    }
+	}
+    };
+    &$rec_traverse ($self->{TREE}, []);
+
+    return undef;
+}
+
+#
+# Set a node in the configuration tree.
+#
+sub set 
+{
+    my $self = shift;
+    my ($path, $value) = @_;
+
+    my $rec_set;
+
+    $rec_set = sub
+    {
+	my ($tree, $path) = @_;
+
+	my $key = shift @$path;
+	if (scalar (@$path) == 0) {
+	    $tree->{$key} = $value;
+	} else {
+	    $tree->{$key} = {} unless exists $tree->{$key};
+	    &$rec_set ($tree->{$key}, $path);
+	}
+    };
+    &$rec_set ($self->{TREE}, $path);
+
+    return undef;
+}
+
+#
+# Get the value of a node from the configuration tree.
+#
+sub get
+{
+    my $self = shift;
+    my ($path) = @_;
+
+    my $rec_get;
+
+    $rec_get = sub
+    {
+	my ($tree, $path) = @_;
+
+	my $key = shift @$path;
+	if (scalar (@$path) == 0) {
+	    return $tree->{$key};
+	} else {
+	    &$rec_get ($tree->{$key}, $path);
+	}
+    };
+    return &$rec_get ($self->{TREE}, $path);
+}
+
+#
+# Write the whole configuration tree into a file.
+#
+sub write
+{
+    my $self = shift;
+    my %args = @_;
+
+    $self->{FILENAME} = $args{filename} if defined $args{filename};
+
+    open (FILE, '>', $self->{FILENAME}) 
+	|| die "Can not open output file '" . $self->{FILENAME} . "'";
+
+    $self->traverse (sub { my ($path, $value) = @_;
+			   $value =~ s/(\\|")/\\$1/g;
+			   print FILE 
+			       join ('.', @$path), ' "',
+			       $value, "\"\n" });
+    close (FILE);
+     
+    return undef;
+}
+
+#
+# Read the whole configuration tree from a file.
+#
+sub read
+{
+    my $self = shift;
+    my %args = @_;
+
+    $self->{FILENAME} = $args{filename} if defined $args{filename};
+
+    # Read file into buffer
+    open (FILE, '<', $self->{FILENAME})
+	|| die "Can not open input file '" . $self->{FILENAME} . "'";
+    my $buffer = '';
+    while (<FILE>) { $buffer .= $_ }
+    close (FILE);
+
+    # Init tree
+    $self->{TREE} = {};
+
+    # Parse buffer
+    my %tokens =
+	grep { defined $_ && $_ ne '' && $_ ne "\n" }
+        split (/(^[A-Za-z0-9_.-]+)|"((?:\\.|[^"])+)"|[\s\n]+/mx, $buffer);
+    
+    # Store unqoted values in tree
+    foreach my $key (sort keys %tokens)
+    {
+	my $value = $tokens{$key};
+	$value =~ s/\\(.)/$1/g;
+	my $path = [split (/\./, $key)];
+	$self->set ($path, $value);
+    }
+
+    return undef;
+}
+
 
 #
 # Object for the source icons
@@ -17,7 +175,9 @@ use Gtk2::SimpleList;
 
 package SourceIconView;
 
+use strict;
 use Glib qw(TRUE FALSE);
+use Gtk2;
 use base qw(Gtk2::IconView);
 use Image::ExifTool;
     
@@ -218,7 +378,9 @@ sub set_set_dates
 #
 package DateSelection;
 
+use strict;
 use Glib qw(TRUE FALSE);
+use Gtk2;
 use base qw(Gtk2::ComboBox);
 
 sub new
@@ -247,7 +409,9 @@ sub set_dates
 #
 package LabeledWidgetArray;
 
+use strict;
 use Glib qw(TRUE FALSE);
+use Gtk2;
 use base qw(Gtk2::Table);
 
 sub new
@@ -323,11 +487,74 @@ sub add_labeled_widget
 }
 
 #
+# Widget for the job list
+#
+package JobList;
+
+use strict;
+use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::SimpleList);
+
+sub new
+{
+    my $class = shift;
+    my $self =  Gtk2::SimpleList->new ('Job'           => 'int',
+				       'Description'   => 'text',
+				       'Directory'     => 'text',
+				       'Renaming rule' => 'text',
+				       'Files'         => 'int');
+    $self->get_column (4)->get_cell_renderers()->set_property ('xalign', 1.0);
+    $self->get_selection->set_mode ('browse');
+    $self->signal_connect (row_activated => sub { print "change date\n" });
+
+    # Fake data
+    @{$self->{data}} = 
+	( [ 1, 'Lenni ist wie ein Schwein', 
+	    '/home/Gemeinsame Dateien/Foto/Original', 
+	    '${EXIF:DateTimeOriginal:Year}/${EXIF:}-$', 
+	    35 ],
+	  [ 2, 'Ebay-Verkäufe', 
+	    '/home/Gemeinsame Dateien/Foto/Original',
+	    '${EXIF:DateTimeOriginal:Year}/${EXIF:}-$', 
+	    5 ],
+	  [ 3, 'Testbilder neues Objektiv', 
+	    '/home/Gemeinsame Dateien/Foto/Original',
+	    '${EXIF:DateTimeOriginal:Year}/${EXIF:}-$', 
+	    21 ] );
+
+    bless $self, $class;
+    return $self;
+}
+
+sub add_job
+{
+    my $self = shift;
+    return undef;
+}
+
+sub delete_job
+{
+    my $self = shift;
+    return undef;
+}
+
+sub append_images
+{
+    my $self = shift;
+    return undef;
+}
+
+
+#
 # Main
 #
 package main;
 
+use strict;
 use Glib qw(TRUE FALSE);
+use Gtk2 -init;
+use Gtk2::SimpleList;
 use Cwd qw(getcwd);
 
 sub show_about_dialog
@@ -588,16 +815,8 @@ sub create_main_window
     $topright_scrolledw->set_policy ('automatic', 'always');
 
     # Listbox for the jobs in the top part of the Vpaned
-    my $job_list = Gtk2::SimpleList->new ('No'          => 'int',
-					  'Description' => 'text',
-					  'Files'       => 'int');
-    $topright_scrolledw->add ($job_list);
-    $job_list->get_column (2)->get_cell_renderers()->set_property ('xalign', 1.0);
-    $job_list->get_selection->set_mode ('browse');
-    $job_list->signal_connect (row_activated => sub { print "change date\n" });
-    @{$job_list->{data}} = ( [ 1, 'Lenni ist wie ein Schwein', 35 ],
-			     [ 2, 'Ebay-Verkäufe', 5 ],
-			     [ 3, 'Testbilder neues Objektiv', 21 ] );
+    my $joblist = JobList->new;
+    $topright_scrolledw->add ($joblist);
 
     # Buttons for the job list
     my $topright_hbbox = Gtk2::HButtonBox->new;
