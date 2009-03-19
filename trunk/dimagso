@@ -1,0 +1,690 @@
+#! /usr/bin/perl -w
+##
+## Dimagso - A tool to sort digital images
+##
+## Time-stamp: <2009-03-18 18:02:09 szi>
+##
+## Sascha Ziemann <ceving@gmail.com>
+##
+
+use strict;
+use Gtk2 -init;
+use Gtk2::SimpleList;
+
+#
+# Object for the source icons
+#
+
+package SourceIconView;
+
+use Glib qw(TRUE FALSE);
+use base qw(Gtk2::IconView);
+use Image::ExifTool;
+    
+sub new
+{
+    my $class = shift;
+    my $self  = Gtk2::IconView->new;
+
+    my %args = @_;
+
+    $self->{LOGGER}    = $args{logger};
+    $self->{DIRECTORY} = $args{directory};
+    $self->{SET_DATES} = $args{set_dates}; # function to update the list of dates
+
+    $self->{ATTRIBUTES} = 
+    {thumbnail => { column => 0,
+		    type   => 'Gtk2::Gdk::Pixbuf' },
+     filename  => { column => 1,
+		    type   => 'Glib::String' },
+     tooltip   => { column => 2,
+		    type   => 'Glib::String' },
+     datetime  => { column => 3,
+		    type   => 'Glib::String' },
+     date      => { column => 4,
+		    type   => 'Glib::String' },
+     jobid     => { column => 5,
+		    type   => 'Glib::Int' }};
+
+    # Create liststore for thumbnail icons
+    $self->{LISTSTORE} = Gtk2::ListStore->new 
+	('Gtk2::Gdk::Pixbuf', # 0 thumbnail
+	 'Glib::String',      # 1 filename
+	 'Glib::String',      # 2 tooltip
+	 'Glib::String',      # 3 datetime
+	 'Glib::String',      # 4 date
+	 'Glib::Int',         # 5 job id
+	);
+    
+    # Sort list
+    $self->{LISTSTORE}->set_sort_column_id 
+	($self->{ATTRIBUTES}->{datetime}->{column}, 
+	 'ascending');
+    
+    # Create a filter for the date
+    $self->{DATE}     = undef; # the date for which icons should be shown
+    $self->{LISTVIEW} = Gtk2::TreeModelFilter->new ($self->{LISTSTORE});
+    $self->{LISTVIEW}->set_visible_func 
+	( sub { 
+	    return TRUE unless defined $self->{DATE};
+	    my ($model, $iter) = @_;
+	    my $date = $model->get ($iter, 4);
+	    return TRUE if defined $date && ($date eq $self->{DATE});
+	    return FALSE;
+	  } );
+    
+    # Create iconview
+    $self->set_model ($self->{LISTVIEW});
+    $self->set_pixbuf_column (0);
+    $self->set_text_column (1);
+    $self->set_tooltip_column (2);
+    $self->set_selection_mode ('multiple');
+    
+    bless $self, $class;
+    return $self;
+}
+
+sub set_logger
+{
+    my $self = shift;
+    $self->{LOGGER} = shift;
+    return undef;
+}
+
+sub set_date
+{
+    my $self = shift;
+
+    my $date = shift;
+    $date = undef if defined $date && $date eq 'any';
+    $self->{DATE} = $date;
+    $self->{LISTVIEW}->refilter;
+
+    return undef;
+}
+
+sub sort_by
+{
+    my $self = shift;
+    my ($key, $order) = @_;
+
+    print "key: $key  order: $order\n";
+
+    $self->{LISTSTORE}->set_sort_column_id 
+	($self->{ATTRIBUTES}->{$key}->{column}, 
+	 $order);
+}
+
+sub get_directory
+{
+    my $self = shift;
+    return $self->{DIRECTORY};
+}
+
+sub get_selected_files 
+{
+    my $self = shift;
+
+    my @paths = $self->get_selected_items;
+    my @iters = map { $self->{LISTVIEW}->get_iter ($_) } @paths;
+    my @values = map { $self->{DIRECTORY} . '/' . $self->{LISTVIEW}->get ($_, 1) } @iters;
+    return \@values;
+}
+
+sub read_directory
+{
+    my $self = shift;
+    my ($dir) = @_;
+
+    my %dates = ();
+
+    # Remove old list
+    $self->{LISTSTORE}->clear;
+    
+    # Read directory
+    opendir (DIR, $dir) || die "Can not open direcotry '$dir'";
+    my @files = grep { -f "$dir/$_" } readdir (DIR);
+    closedir (DIR);
+
+    # Add new files
+    my $imagec = 0;
+    foreach my $filename (@files)
+    {
+	# Read EXIF thumbnail and data
+	my $exif = Image::ExifTool->new;
+	my $info = $exif->ImageInfo 
+	    ($filename, 
+	     'ThumbnailImage', 'Model', 'LensType', 
+	     'FocalLength', 'ExposureTime', 'FNumber', 'ISO', 
+	     'DateTimeOriginal', 'SubSecTimeOriginal');
+	next if scalar keys %$info == 0;
+	my $thumb = ${$info->{ThumbnailImage}};
+	my ($date, $time) = split (/ /, $info->{DateTimeOriginal});
+	$date =~ tr/:/-/;
+	$dates{$date} = 1;
+	$time .= '.'.$info->{SubSecTimeOriginal} if exists $info->{SubSecTimeOriginal};
+	my $tooltip = "$date $time\n$info->{Model}\n$info->{LensType}\n"
+	    ."$info->{FocalLength}, ISO $info->{ISO}, "
+	    ."f/$info->{FNumber}, $info->{ExposureTime}s";
+	my $datetime = "$date$time";
+	$datetime =~ s/[.:-]+//g;
+	
+	# Create pixbuf for thumbnail
+	my $loader = Gtk2::Gdk::PixbufLoader->new;
+	$loader->write ($thumb);
+	$loader->close;
+	my $pixbuf = $loader->get_pixbuf;
+	
+	# Add pixbuf to liststore
+	my $iter = $self->{LISTSTORE}->append;
+	$self->{LISTSTORE}->set 
+	    ($iter,
+	     0, $pixbuf,
+	     1, $filename,
+	     2, $tooltip,
+	     3, $datetime,
+	     4, $date,
+	     5, -1);  # default for no job id
+
+	# Increment image counter
+	$imagec++;
+    }
+
+    my @datelist = sort keys %dates;
+    &{$self->{SET_DATES}}(@datelist);
+
+    $self->{DIRECTORY} = $dir;
+
+    # Notify user
+    my $datec = scalar @datelist;
+    if ($datec == 0) {
+	&{$self->{LOGGER}}("Did not find any images with EXIF data in directory '$dir'.");
+    } else {
+	&{$self->{LOGGER}}("Found $imagec images taken on $datec different days in directory '$dir'.");
+    }
+
+    return undef;
+}
+
+sub set_set_dates
+{
+    my $self = shift;
+    $self->{SET_DATES} = shift;
+}
+
+
+#
+# Widget to display a date selection
+#
+package DateSelection;
+
+use Glib qw(TRUE FALSE);
+use base qw(Gtk2::ComboBox);
+
+sub new
+{
+    my $class = shift;
+    my $self  = Gtk2::ComboBox->new_text (@_);
+
+    bless $self, $class;
+    return $self;
+}
+
+sub set_dates
+{
+    my $self = shift;
+    
+    $self->get_model->clear;
+    foreach ('any', @_)
+    {
+	$self->append_text ($_);
+    }
+    $self->set_active (0);
+}
+
+#
+# Widget to display a row of labeled widgets
+#
+package LabeledWidgetArray;
+
+use Glib qw(TRUE FALSE);
+use base qw(Gtk2::Table);
+
+sub new
+{
+    my $class = shift;
+    my %args = @_;
+
+    die "Argument orientation missing" unless defined $args{orientation};
+    die "Invalid orientation" unless 
+	$args{orientation} eq 'horizontal' || $args{orientation} eq 'vertical';
+    die "Argument size missing" unless defined $args{size};
+    $args{homogeneous} = FALSE unless defined $args{homogeneous};
+
+    my $self;
+    if ($args{orientation} eq 'horizontal')
+    {
+	$self = Gtk2::Table->new (1, $args{size} * 2, $args{homogeneous});
+    }
+    elsif ($args{orientation} eq 'vertical')
+    {
+	$self = Gtk2::Table->new ($args{size}, 2, $args{homogeneous});
+	$self->set_row_spacings (5);
+    }
+    else { die "unknown orientation" }
+
+    $self->set_col_spacings (5);
+
+    $self->{ORIENTATION} = $args{orientation};
+    $self->{CURSOR}      = 0;
+
+    bless $self, $class;
+    return $self;
+}
+
+sub add_labeled_widget 
+{
+    my $self = shift;
+    my ($label, $widget) = @_;
+
+    if ($self->{ORIENTATION} eq 'horizontal')
+    {
+	# Create label
+	$self->attach_defaults (Gtk2::Label->new ($label),
+				$self->{CURSOR}, $self->{CURSOR}+1, 
+				0, 1);
+	$self->{CURSOR} += 1;
+	
+	# Add widget
+	$self->attach_defaults ($widget,
+				$self->{CURSOR}, $self->{CURSOR}+1, 
+				0, 1);
+	
+	# Add additional space between the labeled widgets
+	$self->set_col_spacing ($self->{CURSOR}, 10);
+	
+	$self->{CURSOR} += 1;
+    }
+    elsif ($self->{ORIENTATION} eq 'vertical')
+    {
+	# Create label
+	$self->attach_defaults (Gtk2::Label->new ($label),
+				0, 1,
+				$self->{CURSOR}, $self->{CURSOR}+1);
+	# Add widget
+	$self->attach_defaults ($widget,
+				1, 2,
+				$self->{CURSOR}, $self->{CURSOR}+1);
+	$self->{CURSOR} += 1;
+    }
+    else { die "unknown orientation" }
+
+    return undef;
+}
+
+#
+# Main
+#
+package main;
+
+use Glib qw(TRUE FALSE);
+use Cwd qw(getcwd);
+
+sub show_about_dialog
+{
+    my $about = Gtk2::AboutDialog->new;
+    $about->set_program_name ('Dimagso');
+    $about->set_version ('0.1');
+    $about->set_copyright ('(c) Sascha Ziemann');
+    $about->set_comments ('A tool to sort digital images.');
+    $about->set_website ('http://vs301.hello-server.com/~szi/computer/');
+    $about->run;
+    $about->destroy;
+}
+
+sub show_filechooser_dialog
+{
+
+}
+
+sub create_menubar 
+{
+    my $menu_definition = 
+	[{ label => '_File',
+	   menu  => 
+	       [{ label => 'Empty',
+		  action => sub { } },
+		{ label  => '_Exec ute',
+		  action => sub { },
+		  icon   => 'gtk-execute' },
+		{ label  => '_Apply',
+		  action => sub { },
+		  icon   => 'gtk-apply' },
+		{ label  => '_Play',
+		  action => sub { },
+		  icon   => 'gtk-media-play' },
+		{ label  => '_Jump',
+		  action => sub { },
+		  icon   => 'gtk-jump-to' },
+		{ label  => '_Ok',
+		  action => sub { },
+		  icon   => 'gtk-ok' },
+		{ label  => '_Quit',
+		  action => sub { Gtk2->main_quit },
+		  icon   => 'gtk-quit' }
+	       ]},
+	 { label => '_Options',
+	   menu  => 
+	       [{ label => '_Preferences',
+		  action => sub {  },
+		  icon   => 'gtk-preferences' }
+	       ]},
+	 { label => '_Help',
+	   menu  => 
+	       [{ label => '_About',
+		  action => \&show_about_dialog,
+		  icon   => 'gtk-about' }
+	       ]}
+	];
+
+    my $menubar = Gtk2::MenuBar->new;
+
+    foreach my $menuitem_def (@$menu_definition)
+    {
+	my $menuitem = Gtk2::MenuItem->new_with_mnemonic ($menuitem_def->{label});
+	$menubar->append ($menuitem);
+	my $menu = Gtk2::Menu->new;
+	$menuitem->set_submenu ($menu);
+
+	foreach my $submenuitem_def (@{$menuitem_def->{menu}})
+	{
+	    my $submenuitem;
+	    
+	    if (exists $submenuitem_def->{icon})
+	    {
+		$submenuitem = Gtk2::ImageMenuItem->new_from_stock 
+		    ($submenuitem_def->{icon});
+	    }
+	    else
+	    {
+		$submenuitem = Gtk2::MenuItem->new ($submenuitem_def->{label});
+	    }
+	    $menu->append ($submenuitem);
+	    $submenuitem->signal_connect 
+		(activate => $submenuitem_def->{action});
+	}
+    }
+
+    return $menubar;
+}
+
+
+sub create_toolbar
+{
+    my $toolbar_definition = 
+	[{ stock => 'gtk-open',
+	   action => sub { Gtk2->main_quit } }
+	];
+
+    my $toolbar = Gtk2::Toolbar->new;
+
+    foreach my $toolbar_item (@$toolbar_definition)
+    {
+	my $item = Gtk2::ToolButton->new_from_stock ($toolbar_item->{stock});
+	$toolbar->insert ($item, -1);
+	$item->signal_connect (clicked => $toolbar_item->{action});
+    }
+
+    return $toolbar;
+}
+
+
+sub show_new_job_dialog
+{
+    my %args = @_;
+
+    my $dialog = Gtk2::Dialog->new_with_buttons 
+	('Create a new job',
+	 $args{window},
+	 [qw(modal destroy-with-parent)],
+	 'gtk-ok'     => 'accept',
+	 'gtk-cancel' => 'reject');
+    $dialog->set_default_response ('accept');
+
+    my $table = LabeledWidgetArray->new 
+	(orientation => 'vertical',
+	 size        => 3);
+    $dialog->vbox->add ($table);
+    $table->set_border_width (5);
+
+    $table->add_labeled_widget ('Job description:',       Gtk2::Entry->new);
+    $table->add_labeled_widget ('Destination directory:', Gtk2::Entry->new);
+    $table->add_labeled_widget ('Renaming rule:',         Gtk2::Entry->new);
+
+    $dialog->vbox->show_all;
+    my $result = $dialog->run;
+
+    if ($result eq 'accept')
+    {
+	# Add job
+	
+    }
+
+    $dialog->destroy;
+    return undef;
+}
+
+
+sub create_main_window
+{
+    my %args = @_;
+
+    my $default_width = 1024;
+    my $default_height = 768;
+
+    # Main window
+    my $window = Gtk2::Window->new ('toplevel');
+    $window->set_size_request ($default_width, $default_height);
+    $window->signal_connect (delete_event => sub { return 0 });
+    $window->signal_connect (destroy => sub { Gtk2->main_quit });
+    my $window_vbox = Gtk2::VBox->new (FALSE, 0);
+    $window->add ($window_vbox);
+
+    # Menu bar
+    $window_vbox->pack_start (create_menubar, FALSE, FALSE, 0);
+
+    # Tool bar
+#    $window_vbox->pack_start (create_toolbar, FALSE, FALSE, 0);
+
+    # Global Hpaned
+    my $hpaned = Gtk2::HPaned->new;
+    $window_vbox->pack_start ($hpaned, TRUE, TRUE, 0);
+    
+    # Vbox for the left side of the HPaned
+    my $left_vbox = Gtk2::VBox->new (FALSE, 5);
+    $hpaned->add1 ($left_vbox);
+    $left_vbox->set_border_width (5);
+    
+    # Table for the selection combos
+    my $selection_hbox = Gtk2::HBox->new (FALSE, 0);
+    $left_vbox->pack_start ($selection_hbox, FALSE, FALSE, 0);
+    my $selection_table = LabeledWidgetArray->new 
+	(orientation => 'horizontal',
+	 size        => 4);
+    $selection_hbox->pack_start ($selection_table, FALSE, FALSE, 0);
+
+    # Directory selection
+    my $dirchooser = Gtk2::FileChooserButton->new ('Select a folder', 
+						   'select-folder');
+    $selection_table->add_labeled_widget ('Directory:', $dirchooser);
+    $dirchooser->set_current_folder ($args{directory});
+
+    # Date selection
+    my $datesel = DateSelection->new;
+    $selection_table->add_labeled_widget ('Date:', $datesel);
+
+    # Hide selection
+    my $hidesel = Gtk2::ComboBox->new_text;
+    $hidesel->append_text ('assigned');
+    $hidesel->append_text ('none');
+    $hidesel->set_active (0);
+    $selection_table->add_labeled_widget ('Hide:', $hidesel);
+
+    # Sort selection
+    my $sortsel = Gtk2::ComboBox->new_text;
+    $sortsel->append_text ('Date');
+    $sortsel->append_text ('File name');
+    $sortsel->set_active (0);
+    $selection_table->add_labeled_widget ('Sort by:', $sortsel);
+
+    # Icon view for the images, which should be moved
+    my $left_scrolledw = Gtk2::ScrolledWindow->new (undef, undef);
+    $left_vbox->pack_start ($left_scrolledw, TRUE, TRUE, 0);
+    $left_scrolledw->set_size_request (540, 300);
+    $left_scrolledw->set_shadow_type ('etched-in');
+    $left_scrolledw->set_policy ('never', 'always');
+    my $iconview = SourceIconView->new;
+    $left_scrolledw->add ($iconview);
+    $iconview->set_set_dates (sub { $datesel->set_dates (@_) });
+
+    # Buttons for the icon view
+    my $left_hbbox = Gtk2::HButtonBox->new;
+    $left_vbox->pack_start ($left_hbbox, FALSE, FALSE, 5);
+    $left_hbbox->set_layout ('center');
+    $left_hbbox->set_spacing (10);
+
+    my $select_all_button = Gtk2::Button->new_with_label ('Select all');
+    $left_hbbox->add ($select_all_button);
+    $select_all_button->signal_connect (clicked => sub { $iconview->select_all });
+
+    my $select_none_button = Gtk2::Button->new_with_label ('Select none');
+    $left_hbbox->add ($select_none_button);
+    $select_none_button->signal_connect (clicked => sub { $iconview->unselect_all });
+
+    my $new_job_button = Gtk2::Button->new_with_label ('Create new job');
+    $left_hbbox->add ($new_job_button);
+    $new_job_button->signal_connect 
+	(clicked => sub 
+	 {
+	     show_new_job_dialog (window => $window,
+				  files  => $iconview->get_selected_files);
+	 });
+    $left_hbbox->add (Gtk2::Button->new_with_label ('Add to job'));
+
+    # Vpaned for the right side of the Hpaned
+    my $vpaned = Gtk2::VPaned->new;
+    $hpaned->add2 ($vpaned);
+
+    # Vbox for the job list scrolled window and the button bar
+    my $topright_vbox = Gtk2::VBox->new (FALSE, 5);
+    $vpaned->add1 ($topright_vbox);
+    $topright_vbox->set_border_width (5);
+
+    # Scrolled window for the job list
+    my $topright_scrolledw = Gtk2::ScrolledWindow->new;
+    $topright_vbox->pack_start ($topright_scrolledw, TRUE, TRUE, 0);
+    $topright_scrolledw->set_size_request (400, 200);
+    $topright_scrolledw->set_shadow_type ('etched-in');
+    $topright_scrolledw->set_policy ('automatic', 'always');
+
+    # Listbox for the jobs in the top part of the Vpaned
+    my $job_list = Gtk2::SimpleList->new ('No'          => 'int',
+					  'Description' => 'text',
+					  'Files'       => 'int');
+    $topright_scrolledw->add ($job_list);
+    $job_list->get_column (2)->get_cell_renderers()->set_property ('xalign', 1.0);
+    $job_list->get_selection->set_mode ('browse');
+    $job_list->signal_connect (row_activated => sub { print "change date\n" });
+    @{$job_list->{data}} = ( [ 1, 'Lenni ist wie ein Schwein', 35 ],
+			     [ 2, 'Ebay-Verkäufe', 5 ],
+			     [ 3, 'Testbilder neues Objektiv', 21 ] );
+
+    # Buttons for the job list
+    my $topright_hbbox = Gtk2::HButtonBox->new;
+    $topright_vbox->pack_start ($topright_hbbox, FALSE, FALSE, 5);
+    $topright_hbbox->set_layout ('center');
+    $topright_hbbox->set_spacing (10);
+    $topright_hbbox->add (Gtk2::Button->new_with_label ('Move up'));
+    $topright_hbbox->add (Gtk2::Button->new_with_label ('Move down'));
+    $topright_hbbox->add (Gtk2::Button->new_with_label ('Delete'));
+    
+    # Vbox for transformation list
+    my $bottomright_vbox = Gtk2::VBox->new (FALSE, 5);
+    $vpaned->add2 ($bottomright_vbox);
+    $bottomright_vbox->set_border_width (5);
+    
+    # Scrolled window for the transformation rules
+    my $bottomright_scrolledw = Gtk2::ScrolledWindow->new;
+    $bottomright_vbox->pack_start ($bottomright_scrolledw, TRUE, TRUE, 0);
+    $bottomright_scrolledw->set_size_request (400, 200);
+    $bottomright_scrolledw->set_shadow_type ('etched-in');
+    $bottomright_scrolledw->set_policy ('automatic', 'always');
+    
+    # Transformation list
+    my $trans_list = Gtk2::SimpleList->new ('Job'         => 'int',
+					    'Source'      => 'text',
+					    'Destination' => 'text');
+    $bottomright_scrolledw->add ($trans_list);
+    $trans_list->get_selection->set_mode ('browse');
+    $trans_list->signal_connect (row_activated => sub { print "change date\n" });
+    @{$trans_list->{data}} = 
+	( [ 1, '/media/EOS/dcim/IMG_1111.CR2', 
+	    '/home/Gemeinsame Dateien/Fotos/2009/2006-10-26/CR2/IMG_1111.CR2' ],
+	  [ 1, '/media/EOS/dcim/IMG_1112.CR2', 
+	    '/home/Gemeinsame Dateien/Fotos/2009/2006-10-26/CR2/IMG_1112.CR2' ],
+	  [ 1, '/media/EOS/dcim/IMG_1113.CR2', 
+	    '/home/Gemeinsame Dateien/Fotos/2009/2006-10-26/CR2/IMG_1113.CR2' ] );
+    
+    # Progress bar for transformation
+    my $progress = Gtk2::ProgressBar->new;
+    $bottomright_vbox->pack_start ($progress, FALSE, FALSE, 0);
+    
+    # Buttons for transformation list
+    my $bottomright_hbbox = Gtk2::HButtonBox->new;
+    $bottomright_vbox->pack_start ($bottomright_hbbox, FALSE, FALSE, 5);
+    $bottomright_hbbox->set_layout ('center');
+    $bottomright_hbbox->set_spacing (10);
+    $bottomright_hbbox->add (Gtk2::Button->new_with_label ('Rename'));
+    $bottomright_hbbox->add (Gtk2::Button->new_with_label ('Copy'));
+    $bottomright_hbbox->add (Gtk2::Button->new_with_label ('Move'));
+
+    # Status bar
+    my $statusbar = Gtk2::Statusbar->new;
+    $window_vbox->pack_start ($statusbar, FALSE, FALSE, 0);
+    $statusbar->set_property ('has-resize-grip', FALSE);
+    my $context_id = $statusbar->get_context_id ('');
+    my $logger = sub 
+    {
+	my ($message) = @_;
+	$statusbar->push ($context_id, $message);
+    };
+    $iconview->set_logger ($logger);
+
+    # Update icon view when date selection changes
+    $dirchooser->signal_connect (
+	'current-folder-changed' => sub 
+	{
+	    my $dir = $dirchooser->get_current_folder;
+	    return if $iconview->get_directory eq $dir;
+	    $iconview->read_directory ($dir);
+	});
+    $datesel->signal_connect 
+	(changed => sub { $iconview->set_date ($datesel->get_active_text) });
+    $sortsel->signal_connect
+	(changed => sub { my %col = (0 => 'datetime', 
+				     1 => 'filename');
+			  $iconview->sort_by ($col{$sortsel->get_active},
+					      'ascending') }),
+    
+    # Read directory
+    $iconview->read_directory ($args{directory});
+
+
+    $window->show_all;
+    return $window;
+}
+
+
+# Start GUI
+create_main_window (directory => getcwd);
+Gtk2->main;
