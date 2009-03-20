@@ -2,7 +2,7 @@
 ##
 ## Dimagso - A tool to sort digital images
 ##
-## Time-stamp: <2009-03-19 18:42:52 szi>
+## Time-stamp: <2009-03-20 18:19:27 szi>
 ##
 ## Sascha Ziemann <ceving@gmail.com>
 ##
@@ -18,10 +18,8 @@ sub new
     my %args  = @_;
     my $self  = {};
     
-    foreach (qw(tree filename)) 
-    {
-	$self->{uc $_} = $args{$_};
-    }
+    $self->{TREE} = defined $args{tree} && ref $args{tree} eq 'HASH' ? $args{tree} : {};
+    $self->{FILENAME} = $args{filename};
 
     bless $self, $class;
     return $self;
@@ -552,6 +550,7 @@ sub append_images
 package main;
 
 use strict;
+use Error qw(:try :warndie);
 use Glib qw(TRUE FALSE);
 use Gtk2 -init;
 use Gtk2::SimpleList;
@@ -684,7 +683,12 @@ sub show_new_job_dialog
     $dialog->vbox->add ($table);
     $table->set_border_width (5);
 
-    $table->add_labeled_widget ('Job description:',       Gtk2::Entry->new);
+    my $combo = Gtk2::ComboBoxEntry->new_text;
+    foreach (@{$args{jobs}})
+    {
+	$combo->append_text ($_);
+    }
+    $table->add_labeled_widget ('Job description:',       $combo);
     $table->add_labeled_widget ('Destination directory:', Gtk2::Entry->new);
     $table->add_labeled_widget ('Renaming rule:',         Gtk2::Entry->new);
 
@@ -793,8 +797,10 @@ sub create_main_window
     $new_job_button->signal_connect 
 	(clicked => sub 
 	 {
-	     show_new_job_dialog (window => $window,
-				  files  => $iconview->get_selected_files);
+	     show_new_job_dialog 
+		 (window => $window,
+		  files  => $iconview->get_selected_files,
+		  jobs   => [sort values %{$args{config}->{TREE}->{jobs}->{recent}}]);
 	 });
     $left_hbbox->add (Gtk2::Button->new_with_label ('Add to job'));
 
@@ -903,7 +909,31 @@ sub create_main_window
     return $window;
 }
 
+# Load configuration
+my $config = Config->new (tree => {default => 1},
+			  filename => 'dimagso.cfg');
+try { $config->read; }
+catch Error with {
+    # Init configuration
+    warn "Initializing a new configuration";
+    $config->set ([qw (jobs recent 0)], 'Lennart eats like a pig');
+    $config->set ([qw (jobs recent 1)], 'Macros of a bie');
+    $config->set ([qw (jobs recent 2)], 'Christmas day 1');
+    $config->set ([qw (jobs recent 3)], 'Christmas day 2');
+    $config->set ([qw (dirs recent 0)], '/home/szi/Foto/Original');
+    $config->set ([qw (dirs recent 1)], '/home/Gemeinsame Dateien/Foto/Original');
+    $config->set ([qw (rules 0 name)], 'Move images');
+    $config->set ([qw (rules 0 dir)],  '/home/Gemeinsame Dateien/Foto/Original');
+    $config->set ([qw (rules 0 ren)],  '');
+};
+
+use Data::Dumper;
+print Dumper ($config->{TREE});
 
 # Start GUI
-create_main_window (directory => getcwd);
+create_main_window (directory => getcwd,
+		    config => $config);
 Gtk2->main;
+
+# Write changed configuration
+$config->write;
