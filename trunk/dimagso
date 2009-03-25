@@ -2,12 +2,18 @@
 ##
 ## Dimagso - A tool to sort digital images
 ##
-## Time-stamp: <2009-03-20 18:19:27 szi>
+## Time-stamp: <2009-03-25 14:43:19 szi>
 ##
 ## Sascha Ziemann <ceving@gmail.com>
 ##
 
 
+
+######################################################################
+##
+##  Package to read and write configuration files
+##
+######################################################################
 
 package Config;
 use strict;
@@ -167,9 +173,223 @@ sub read
 }
 
 
-#
-# Object for the source icons
-#
+
+######################################################################
+##
+##  Package to parse, dump and evaluate simple expressions
+##
+######################################################################
+
+package Sexpr;
+use strict;
+
+sub new 
+{
+    my $class = shift;
+
+    my $self = {};
+    $self->{TREE} = {};  # named parse trees
+    $self->{GENV} = {};  # global environment
+
+    bless $self, $class;
+
+    $self->parse (@_);
+
+    return $self;
+}
+
+sub parse
+{
+    my $self = shift;
+    my %args = @_;
+
+    foreach (keys %args)
+    {
+	my $string = $args{$_};
+	$self->{TREE}->{$_} = parse_list (\$string);
+    }
+    return undef;
+}
+
+sub stringify
+{
+    my $self = shift;
+
+    return map { dump_list ($self->{TREE}->{$_}) } @_;
+}
+
+sub define
+{
+    my $self = shift;
+    my %args = @_;
+
+    foreach (keys %args)
+    {
+	$self->{GENV}->{$_} = $args{$_};
+    }
+    return undef;
+}
+
+sub evaluate
+{
+    my $self = shift;
+    my %args = @_;
+    
+    my @result = ();
+    foreach (keys %args)
+    {
+	die "Rule '$_' undefined." unless defined $self->{TREE}->{$_};
+	my $rule = $self->{TREE}->{$_};
+	my $env  = $args{$_};
+
+	my $str = evaluate_list ($rule, $self->{GENV}, $env);
+
+	push @result, $str;
+    }
+    return @result;
+}
+
+sub parse_token
+{
+    my ($str_r) = @_;
+
+    $$str_r =~ s/^[\s\n]+//s;
+
+    return undef if $$str_r =~ /^$/s;
+
+    if ($$str_r =~ s/^"((?:\\.|[^"])+)"//s) {
+    	return { type => 'string',
+		 value => $1 };
+    }
+    elsif ($$str_r =~ s/^([a-zA-Z0-9_][a-zA-Z0-9_.:\/\$\&\?*!#+-]*)//) {
+	return { type => 'symbol', 
+		 value => $1 };
+    }
+    elsif ($$str_r =~ s/^\(//) {
+	return { type => 'opening-parenthesis' };
+    }
+    elsif ($$str_r =~ s/^\)//) {
+	return { type => 'closing-parenthesis' };
+    }
+    else { die "Invalid token '".substr ($$str_r, 0, 10)."'" }
+}
+
+sub parse_list
+{
+    my ($str_r, $without_parenthesis) = @_;
+    
+    my @list = ();
+    my $token;
+
+    unless ($without_parenthesis) 
+    {
+	$token = parse_token ($str_r);
+	die "Expecting opening parenthesis. Got '".%$token."'." 
+	    unless $token->{type} eq 'opening-parenthesis';
+    }
+    while ($token = parse_token ($str_r))
+    {
+	if ($token->{type} eq 'opening-parenthesis')
+	{
+	    push @list, parse_list ($str_r, 1);
+	}
+	elsif ($token->{type} eq 'closing-parenthesis')
+	{
+	    return \@list;
+	}
+	else 
+	{ 
+	    push @list, $token 
+	}
+    }
+    die "Expecting closing parenthesis. Got '".%$token."'.";
+}
+
+sub dump_token
+{
+    my ($token) = @_;
+
+    if ($token->{type} eq 'string') {
+	return '"'.$token->{value}.'"',
+    }
+    elsif ($token->{type} eq 'symbol') {
+	return $token->{value};
+    }
+    else { die "Unknown token type." }
+}
+
+sub dump_list
+{
+    my ($list) = @_;
+
+    if (ref ($list) eq 'ARRAY')
+    {
+	my @result = ();
+
+	foreach (@$list)
+	{
+	    if (ref ($_) eq 'HASH') {
+		push @result, dump_token ($_);
+	    }
+	    elsif (ref ($_) eq 'ARRAY') {
+		push @result, dump_list ($_);
+	    }
+	    else { die "Invalid element" }
+	}
+	return '(' . join (' ', @result) . ')';
+    }
+    else { die "Invalid argument" }
+}
+
+sub evaluate_token
+{
+    my ($token, $genv, $lenv) = @_;
+
+    if ($token->{type} eq 'string') {
+	return $token->{value},
+    }
+    elsif ($token->{type} eq 'symbol') {
+	return $lenv->{$token->{value}} if defined $lenv->{$token->{value}};
+	return $genv->{$token->{value}} if defined $genv->{$token->{value}};
+	die "Symbol '".$token->{value}."' undefined."
+    }
+    else { die "Unknown token type." }
+}
+
+sub evaluate_list
+{
+    my ($list, $genv, $lenv) = @_;
+
+    if (ref ($list) eq 'ARRAY')
+    {
+	my @result = ();
+
+	foreach (@$list)
+	{
+	    if (ref ($_) eq 'HASH') {
+		push @result, evaluate_token ($_, $genv, $lenv);
+	    }
+	    elsif (ref ($_) eq 'ARRAY') {
+		push @result, evaluate_list ($_, $genv, $lenv);
+	    }
+	    else { die "Invalid element." }
+	}
+
+	my $func = shift @result;
+	my $str = &$func (@result);
+	
+	return $str;
+    }
+    else { die "Invalid argument." }
+}
+
+
+
+######################################################################
+##
+##  Object for the source icons
+##
+######################################################################
 
 package SourceIconView;
 
@@ -371,9 +591,13 @@ sub set_set_dates
 }
 
 
-#
-# Widget to display a date selection
-#
+
+######################################################################
+##
+##  Widget to display a date selection
+##
+######################################################################
+
 package DateSelection;
 
 use strict;
@@ -402,9 +626,14 @@ sub set_dates
     $self->set_active (0);
 }
 
-#
-# Widget to display a row of labeled widgets
-#
+
+
+######################################################################
+##
+##  Widget to display a row of labeled widgets
+##
+######################################################################
+
 package LabeledWidgetArray;
 
 use strict;
@@ -484,9 +713,14 @@ sub add_labeled_widget
     return undef;
 }
 
-#
-# Widget for the job list
-#
+
+
+######################################################################
+##
+##  Widget for the job list
+##
+######################################################################
+
 package JobList;
 
 use strict;
@@ -544,9 +778,13 @@ sub append_images
 }
 
 
-#
-# Main
-#
+
+######################################################################
+##
+##  Main
+##
+######################################################################
+
 package main;
 
 use strict;
