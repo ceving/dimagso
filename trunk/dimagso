@@ -2,7 +2,7 @@
 ##
 ## Dimagso - A tool to sort digital images
 ##
-## Time-stamp: <2009-03-25 14:43:19 szi>
+## Time-stamp: <2009-03-29 14:55:25 szi>
 ##
 ## Sascha Ziemann <ceving@gmail.com>
 ##
@@ -29,6 +29,16 @@ sub new
 
     bless $self, $class;
     return $self;
+}
+
+#
+# Set or get the whole configuration tree
+#
+sub tree
+{
+    my $self = shift;
+    $self->{TREE} = shift if @_;
+    return $self->{TREE};
 }
 
 #
@@ -381,6 +391,61 @@ sub evaluate_list
 	return $str;
     }
     else { die "Invalid argument." }
+}
+
+
+
+######################################################################
+##
+##  Class for named objects
+##
+######################################################################
+
+package NamedObject;
+
+use strict;
+
+my %OBJECT_BY_REFERENCE = ();
+my %OBJECT_BY_NAME      = ();
+
+sub name_object
+{
+    my $self = shift;
+    my $name = shift;
+
+    die "Name argument missing" unless defined $name;
+
+    delete ($OBJECT_BY_NAME{$name})
+	if exists ($OBJECT_BY_NAME{$name});
+    $OBJECT_BY_REFERENCE{$self} = $name;
+    $OBJECT_BY_NAME{$name} = $self;
+    
+    return undef;
+}
+
+sub object_name
+{
+    my $self = shift;
+    return $OBJECT_BY_REFERENCE{$self};
+}
+
+sub object_by_name
+{
+    my $self = shift;
+    my $name = shift;
+
+    die "Name argument missing" unless defined $name;
+
+    return $OBJECT_BY_NAME{$name};
+}
+
+sub DESTROY
+{
+    my $self = shift;
+    my $name = $OBJECT_BY_REFERENCE{$self};
+    delete $OBJECT_BY_REFERENCE{$self};
+    delete $OBJECT_BY_NAME{$name};
+    return undef;
 }
 
 
@@ -781,6 +846,36 @@ sub append_images
 
 ######################################################################
 ##
+##  Base package for the application
+##
+######################################################################
+package Diphoso;
+
+use strict;
+
+{
+    my $config;
+    sub config {
+	shift;      # XXX: unused
+	$config = shift if @_;
+	return $config;
+    }
+}
+
+sub make
+{
+    my $this = shift;
+    my $class = ref($this) || $this;
+    my $self = {};
+    bless $self, $class;
+    $self->initialize();
+    return $self;
+}
+
+
+
+######################################################################
+##
 ##  Main
 ##
 ######################################################################
@@ -794,11 +889,13 @@ use Gtk2 -init;
 use Gtk2::SimpleList;
 use Cwd qw(getcwd);
 
+my $VERSION = '0.1';
+
 sub show_about_dialog
 {
     my $about = Gtk2::AboutDialog->new;
     $about->set_program_name ('Dimagso');
-    $about->set_version ('0.1');
+    $about->set_version ($VERSION);
     $about->set_copyright ('(c) Sascha Ziemann');
     $about->set_comments ('A tool to sort digital images.');
     $about->set_website ('http://vs301.hello-server.com/~szi/computer/');
