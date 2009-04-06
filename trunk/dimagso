@@ -2,20 +2,74 @@
 ##
 ## Dimagso - A tool to sort digital images
 ##
-## Time-stamp: <2009-03-29 14:55:25 szi>
+## Time-stamp: <2009-04-06 17:49:32 szi>
 ##
 ## Sascha Ziemann <ceving@gmail.com>
+##
+##
+## DOCUMENTATION
+## =============
+##
+## The program is divided in the following packages.
+##
+## The default package for Perl programs:
+##
+##   main                       - Start of the program.
+##
+## Packages for application specific purposes:
+##
+##   Dimagso                    - The application itself.
+##
+##   Dimagso::MainWindow        - Main window of the application.
+##   Dimagso::MenuBar           - Menu bar for the application.
+##   Dimagso::ToolBar           - Tool bar for the application.
+##   Dimagso::StatusBar         - Status bar for the application.
+##   Dimagso::SourceIconView    - Icon view to display images.
+##   Dimagso::DateSelection     - Selection for the date.
+##   Dimagso::DirChooserButton  - Selection of a directory.
+##   Dimagso::HideSelection     - Selection what should be hidden.
+##   Dimagso::SortSelection     - Selection how to sort.
+##   Dimagso::SelectAllButton   - Button to select all images.
+##   Dimagso::SelectNoneButton  - Button to remove selection.
+##   Dimagso::CreateJobButton   - Button to create a new job.
+##   Dimagso::AddToJobButton    - Button to add to an existing job.
+##   Dimagso::JobList           - List of defined jobs.
+##   Dimagso::WorkList          - List of work to be done.
+##   Dimagso::WorkProgress      - Progress meter for the work.
+##   Dimagso::RenameButton      - Button to rename the images.
+##   Dimagso::CopyButton        - Button to copy the images.
+##   Dimagso::MoveButton        - Button to move the images.
+##
+##   Dimagso::AboutDialog       - About dialgo.
+##   Dimagso::JobDialog         - Job dialog.
+##
+## Packages for GTK+ specific purposes:
+##
+##   LabeledWidgetArray         - Align widgets and labels.
+##
+## Packages for general purposes:
+##
+##   Config                     - Read and write configuration data.
+##   Sexpr                      - Read, write and evaluate simple expressions.
+##   NamedObject                - Create named objects.
+##
+## The order of the packages in this file is a bit different, beacuse
+## all packages are within one file.  This makes it neccessary, that
+## the packages which are used by other packages have to be defined
+## first.  Practically this means that the packages main and Dimagso,
+## which need the other packages, are at the end of the file, while
+## the basic general purpose packages are at the beginning.
 ##
 
 
 
 ######################################################################
 ##
-##  Package to read and write configuration files
+## Read and write configuration data
 ##
-######################################################################
 
-package Config;
+package AppConfig;
+
 use strict;
 
 sub new
@@ -29,6 +83,13 @@ sub new
 
     bless $self, $class;
     return $self;
+}
+
+sub DESTROY
+{
+    my $self = shift;
+    $self->write;
+    return undef;
 }
 
 #
@@ -186,12 +247,14 @@ sub read
 
 ######################################################################
 ##
-##  Package to parse, dump and evaluate simple expressions
+## Parse, dump and evaluate simple expressions
 ##
-######################################################################
 
 package Sexpr;
+
 use strict;
+use Carp;
+
 
 sub new 
 {
@@ -248,7 +311,7 @@ sub evaluate
     my @result = ();
     foreach (keys %args)
     {
-	die "Rule '$_' undefined." unless defined $self->{TREE}->{$_};
+	croak "Rule '$_' undefined." unless defined $self->{TREE}->{$_};
 	my $rule = $self->{TREE}->{$_};
 	my $env  = $args{$_};
 
@@ -325,7 +388,7 @@ sub dump_token
     elsif ($token->{type} eq 'symbol') {
 	return $token->{value};
     }
-    else { die "Unknown token type." }
+    else { croak "Unknown token type." }
 }
 
 sub dump_list
@@ -344,11 +407,11 @@ sub dump_list
 	    elsif (ref ($_) eq 'ARRAY') {
 		push @result, dump_list ($_);
 	    }
-	    else { die "Invalid element" }
+	    else { croak "Invalid element" }
 	}
 	return '(' . join (' ', @result) . ')';
     }
-    else { die "Invalid argument" }
+    else { croak "Invalid argument" }
 }
 
 sub evaluate_token
@@ -361,9 +424,9 @@ sub evaluate_token
     elsif ($token->{type} eq 'symbol') {
 	return $lenv->{$token->{value}} if defined $lenv->{$token->{value}};
 	return $genv->{$token->{value}} if defined $genv->{$token->{value}};
-	die "Symbol '".$token->{value}."' undefined."
+	croak "Symbol '".$token->{value}."' undefined."
     }
-    else { die "Unknown token type." }
+    else { croak "Unknown token type." }
 }
 
 sub evaluate_list
@@ -390,7 +453,7 @@ sub evaluate_list
 	
 	return $str;
     }
-    else { die "Invalid argument." }
+    else { croak "Invalid argument." }
 }
 
 
@@ -399,11 +462,11 @@ sub evaluate_list
 ##
 ##  Class for named objects
 ##
-######################################################################
 
 package NamedObject;
 
 use strict;
+use Carp;
 
 my %OBJECT_BY_REFERENCE = ();
 my %OBJECT_BY_NAME      = ();
@@ -413,7 +476,7 @@ sub name_object
     my $self = shift;
     my $name = shift;
 
-    die "Name argument missing" unless defined $name;
+    croak "Name argument undefined" unless defined $name;
 
     delete ($OBJECT_BY_NAME{$name})
 	if exists ($OBJECT_BY_NAME{$name});
@@ -434,8 +497,8 @@ sub object_by_name
     my $self = shift;
     my $name = shift;
 
-    die "Name argument missing" unless defined $name;
-
+    croak "Name argument undefined" unless defined $name;
+    
     return $OBJECT_BY_NAME{$name};
 }
 
@@ -452,18 +515,317 @@ sub DESTROY
 
 ######################################################################
 ##
+##  Widget to display a row of labeled widgets
+##
+
+package LabeledWidgetArray;
+
+use strict;
+use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::Table);
+
+sub new
+{
+    my $class = shift;
+    my %args = @_;
+
+    die "Argument orientation missing" unless defined $args{orientation};
+    die "Invalid orientation" unless 
+	$args{orientation} eq 'horizontal' || $args{orientation} eq 'vertical';
+    die "Argument size missing" unless defined $args{size};
+    $args{homogeneous} = FALSE unless defined $args{homogeneous};
+
+    my $self;
+    if ($args{orientation} eq 'horizontal')
+    {
+	$self = Gtk2::Table->new (1, $args{size} * 2, $args{homogeneous});
+    }
+    elsif ($args{orientation} eq 'vertical')
+    {
+	$self = Gtk2::Table->new ($args{size}, 2, $args{homogeneous});
+	$self->set_row_spacings (5);
+    }
+    else { die "unknown orientation" }
+
+    $self->set_col_spacings (5);
+
+    $self->{ORIENTATION} = $args{orientation};
+    $self->{CURSOR}      = 0;
+
+    bless $self, $class;
+    return $self;
+}
+
+sub add_labeled_widget 
+{
+    my $self = shift;
+    my ($text, $widget) = @_;
+
+    my $label = Gtk2::Label->new ($text);
+    $label->set_property (xalign => 0);
+
+    if ($self->{ORIENTATION} eq 'horizontal')
+    {
+	# Create label
+	$self->attach_defaults ($label,
+				$self->{CURSOR}, $self->{CURSOR}+1, 
+				0, 1);
+	$self->{CURSOR} += 1;
+	
+	# Add widget
+	$self->attach_defaults ($widget,
+				$self->{CURSOR}, $self->{CURSOR}+1, 
+				0, 1);
+	
+	# Add additional space between the labeled widgets
+	$self->set_col_spacing ($self->{CURSOR}, 10);
+	
+	$self->{CURSOR} += 1;
+    }
+    elsif ($self->{ORIENTATION} eq 'vertical')
+    {
+	# Create label
+	$self->attach_defaults ($label,
+				0, 1,
+				$self->{CURSOR}, $self->{CURSOR}+1);
+	# Add widget
+	$self->attach_defaults ($widget,
+				1, 2,
+				$self->{CURSOR}, $self->{CURSOR}+1);
+	$self->{CURSOR} += 1;
+    }
+    else { die "unknown orientation" }
+
+    return undef;
+}
+
+
+
+######################################################################
+##
+##  Dimagso Menu Bar
+##
+
+package Dimagso::MenuBar;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::MenuBar);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::MenuBar->new;
+    bless $self, $class;
+    return $self;
+}
+
+sub define
+{
+    my $self = shift;
+    my $menu_definition = shift;
+
+    foreach my $menuitem_def (@$menu_definition)
+    {
+	my $menuitem = Gtk2::MenuItem->new_with_mnemonic ($menuitem_def->{label});
+	$self->append ($menuitem);
+	my $menu = Gtk2::Menu->new;
+	$menuitem->set_submenu ($menu);
+
+	foreach my $submenuitem_def (@{$menuitem_def->{menu}})
+	{
+	    my $submenuitem;
+	    
+	    if (exists $submenuitem_def->{icon})
+	    {
+		$submenuitem = Gtk2::ImageMenuItem->new_from_stock 
+		    ($submenuitem_def->{icon});
+	    }
+	    else
+	    {
+		$submenuitem = Gtk2::MenuItem->new ($submenuitem_def->{label});
+	    }
+	    $menu->append ($submenuitem);
+	    $submenuitem->signal_connect 
+		(activate => $submenuitem_def->{action});
+	}
+    }
+
+    return undef;
+}
+
+
+
+######################################################################
+package Dimagso::ToolBar;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::Toolbar);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Toolbar->new;
+    bless $self, $class;
+    return $self;
+}
+
+sub define
+{
+    my $self = shift;
+    my $toolbar_definition = shift;
+
+    foreach my $toolbar_item (@$toolbar_definition)
+    {
+	my $item = Gtk2::ToolButton->new_from_stock ($toolbar_item->{stock});
+	$self->insert ($item, -1);
+	$item->signal_connect (clicked => $toolbar_item->{action});
+    }
+    return undef;
+}
+
+
+
+######################################################################
+package Dimagso::StatusBar;
+
+use strict;
+use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::Statusbar);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Statusbar->new;
+    bless $self, $class;
+
+    $self->set_property ('has-resize-grip', FALSE);
+
+    return $self;
+}
+
+sub make_logger
+{
+    my $self = shift;
+    my ($context) = @_;
+
+    my $context_id = $self->get_context_id ($context || '');
+
+    return sub {
+	$self->pop ($context_id); # we do not need the stack
+	$self->push ($context_id, join ('', @_));
+    };
+}
+
+
+
+######################################################################
+##
+##  Dimagso About Dialog
+##
+
+package Dimagso::AboutDialog;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::AboutDialog);
+
+sub show
+{
+    my $class = shift;
+    my $self = Gtk2::AboutDialog->new;
+    bless $self, $class;
+
+    $self->set_program_name ('Dimagso');
+    $self->set_version (Dimagso->version);
+    $self->set_copyright ('(c) Sascha Ziemann');
+    $self->set_comments ('A tool to sort digital images.');
+    $self->set_website ('http://vs301.hello-server.com/~szi/computer/');
+    $self->run;
+    $self->destroy;
+
+    return undef;
+}
+
+
+
+######################################################################
+package Dimagso::JobDialog;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::Dialog);
+
+sub show
+{
+    my $class = shift;
+    my %args = @_;
+
+    my $self = Gtk2::Dialog->new_with_buttons
+	('Create a new job',
+	 Dimagso::window(),
+	 [qw(modal destroy-with-parent)],
+	 'gtk-ok'     => 'accept',
+	 'gtk-cancel' => 'reject');
+    bless $self, $class;
+
+    $self->set_default_response ('accept');
+
+    my $table = LabeledWidgetArray->new 
+	(orientation => 'vertical',
+	 size        => 3);
+    $self->vbox->add ($table);
+    $table->set_border_width (5);
+
+    my $description_combo = Gtk2::ComboBoxEntry->new_text;
+    foreach (sort values %{Dimagso::config()->{jobs}->{recent}}) {
+	$description_combo->append_text ($_);
+    }
+    my $directory_combo = Gtk2::ComboBoxEntry->new_text;
+    foreach (sort values %{Dimagso::config()->{dirs}->{recent}}) {
+	$directory_combo->append_text ($_);
+    }
+    my $rule_combo = Gtk2::ComboBoxEntry->new_text;
+    foreach (sort map { $_->{name} } values %{Dimagso::config()->{rules}->{recent}}) {
+	$rule_combo->append_text ($_);
+    }
+
+    $table->add_labeled_widget ('Job description:',       $description_combo);
+    $table->add_labeled_widget ('Destination directory:', $directory_combo);
+    $table->add_labeled_widget ('Transformation rule:',   $rule_combo);
+
+    $self->vbox->show_all;
+    my $result = $self->run;
+
+    if ($result eq 'accept')
+    {
+	# Add job
+	
+    }
+
+    $self->destroy;
+    return undef;
+}
+
+
+
+######################################################################
+##
 ##  Object for the source icons
 ##
-######################################################################
 
-package SourceIconView;
+package Dimagso::SourceIconView;
 
 use strict;
 use Glib qw(TRUE FALSE);
 use Gtk2;
 use base qw(Gtk2::IconView);
 use Image::ExifTool;
-    
+
+
 sub new
 {
     my $class = shift;
@@ -471,7 +833,7 @@ sub new
 
     my %args = @_;
 
-    $self->{LOGGER}    = $args{logger};
+#    $self->{LOGGER}    = $args{logger};
     $self->{DIRECTORY} = $args{directory};
     $self->{SET_DATES} = $args{set_dates}; # function to update the list of dates
 
@@ -527,12 +889,12 @@ sub new
     return $self;
 }
 
-sub set_logger
-{
-    my $self = shift;
-    $self->{LOGGER} = shift;
-    return undef;
-}
+#sub set_logger
+#{
+#    my $self = shift;
+#    $self->{LOGGER} = shift;
+#    return undef;
+#}
 
 sub set_date
 {
@@ -550,8 +912,6 @@ sub sort_by
 {
     my $self = shift;
     my ($key, $order) = @_;
-
-    print "key: $key  order: $order\n";
 
     $self->{LISTSTORE}->set_sort_column_id 
 	($self->{ATTRIBUTES}->{$key}->{column}, 
@@ -641,9 +1001,11 @@ sub read_directory
     # Notify user
     my $datec = scalar @datelist;
     if ($datec == 0) {
-	&{$self->{LOGGER}}("Did not find any images with EXIF data in directory '$dir'.");
+	#&{$self->{LOGGER}}("Did not find any images with EXIF data in directory '$dir'.");
+	Dimagso::logger ("Did not find any images with EXIF data in directory '$dir'.");
     } else {
-	&{$self->{LOGGER}}("Found $imagec images taken on $datec different days in directory '$dir'.");
+	#&{$self->{LOGGER}}("Found $imagec images taken on $datec different days in directory '$dir'.");
+	Dimagso::logger ("Found $imagec images taken on $datec different days in directory '$dir'.");
     }
 
     return undef;
@@ -661,9 +1023,8 @@ sub set_set_dates
 ##
 ##  Widget to display a date selection
 ##
-######################################################################
 
-package DateSelection;
+package Dimagso::DateSelection;
 
 use strict;
 use Glib qw(TRUE FALSE);
@@ -694,88 +1055,128 @@ sub set_dates
 
 
 ######################################################################
-##
-##  Widget to display a row of labeled widgets
-##
-######################################################################
-
-package LabeledWidgetArray;
+package Dimagso::DirChooserButton;
 
 use strict;
-use Glib qw(TRUE FALSE);
 use Gtk2;
-use base qw(Gtk2::Table);
+use base qw(Gtk2::FileChooserButton);
 
 sub new
 {
     my $class = shift;
     my %args = @_;
-
-    die "Argument orientation missing" unless defined $args{orientation};
-    die "Invalid orientation" unless 
-	$args{orientation} eq 'horizontal' || $args{orientation} eq 'vertical';
-    die "Argument size missing" unless defined $args{size};
-    $args{homogeneous} = FALSE unless defined $args{homogeneous};
-
-    my $self;
-    if ($args{orientation} eq 'horizontal')
-    {
-	$self = Gtk2::Table->new (1, $args{size} * 2, $args{homogeneous});
-    }
-    elsif ($args{orientation} eq 'vertical')
-    {
-	$self = Gtk2::Table->new ($args{size}, 2, $args{homogeneous});
-	$self->set_row_spacings (5);
-    }
-    else { die "unknown orientation" }
-
-    $self->set_col_spacings (5);
-
-    $self->{ORIENTATION} = $args{orientation};
-    $self->{CURSOR}      = 0;
-
+    my $self = Gtk2::FileChooserButton->new ('Select a folder', 
+					     'select-folder');
     bless $self, $class;
     return $self;
 }
 
-sub add_labeled_widget 
+
+
+######################################################################
+package Dimagso::HideSelection;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::ComboBox);
+
+sub new
 {
-    my $self = shift;
-    my ($label, $widget) = @_;
+    my $class = shift;
+    my $self = Gtk2::ComboBox->new_text;
+    bless $self, $class;
+    $self->append_text ('assigned');
+    $self->append_text ('none');
+    $self->set_active (0);
+    return $self;
+}
 
-    if ($self->{ORIENTATION} eq 'horizontal')
-    {
-	# Create label
-	$self->attach_defaults (Gtk2::Label->new ($label),
-				$self->{CURSOR}, $self->{CURSOR}+1, 
-				0, 1);
-	$self->{CURSOR} += 1;
-	
-	# Add widget
-	$self->attach_defaults ($widget,
-				$self->{CURSOR}, $self->{CURSOR}+1, 
-				0, 1);
-	
-	# Add additional space between the labeled widgets
-	$self->set_col_spacing ($self->{CURSOR}, 10);
-	
-	$self->{CURSOR} += 1;
-    }
-    elsif ($self->{ORIENTATION} eq 'vertical')
-    {
-	# Create label
-	$self->attach_defaults (Gtk2::Label->new ($label),
-				0, 1,
-				$self->{CURSOR}, $self->{CURSOR}+1);
-	# Add widget
-	$self->attach_defaults ($widget,
-				1, 2,
-				$self->{CURSOR}, $self->{CURSOR}+1);
-	$self->{CURSOR} += 1;
-    }
-    else { die "unknown orientation" }
 
-    return undef;
+
+######################################################################
+package Dimagso::SortSelection;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::ComboBox);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::ComboBox->new_text;
+    bless $self, $class;
+    $self->append_text ('Date');
+    $self->append_text ('File name');
+    $self->set_active (0);
+    return $self;
+}
+
+
+
+######################################################################
+package Dimagso::SelectAllButton;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::Button);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Button->new_with_label ('Select all');
+    bless $self, $class;
+    return $self;
+}
+
+
+
+######################################################################
+package Dimagso::SelectNoneButton;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::Button);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Button->new_with_label ('Select none');
+    bless $self, $class;
+    return $self;
+}
+
+
+
+######################################################################
+package Dimagso::CreateJobButton;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::Button);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Button->new_with_label ('Create new job');
+    bless $self, $class;
+    return $self;
+}
+
+
+
+######################################################################
+package Dimagso::AddToJobButton;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::Button);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Button->new_with_label ('Add to job');
+    bless $self, $class;
+    return $self;
 }
 
 
@@ -784,9 +1185,8 @@ sub add_labeled_widget
 ##
 ##  Widget for the job list
 ##
-######################################################################
 
-package JobList;
+package Dimagso::JobList;
 
 use strict;
 use Glib qw(TRUE FALSE);
@@ -846,29 +1246,45 @@ sub append_images
 
 ######################################################################
 ##
-##  Base package for the application
+##  Widget for the work list
 ##
-######################################################################
-package Diphoso;
+
+package Dimagso::WorkList;
 
 use strict;
+use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::SimpleList);
 
+sub new
 {
-    my $config;
-    sub config {
-	shift;      # XXX: unused
-	$config = shift if @_;
-	return $config;
-    }
-}
-
-sub make
-{
-    my $this = shift;
-    my $class = ref($this) || $this;
-    my $self = {};
+    my $class = shift;
+    my $self =  Gtk2::SimpleList->new ('Job'           => 'int',
+				       'Description'   => 'text',
+				       'Directory'     => 'text',
+				       'Renaming rule' => 'text',
+				       'Files'         => 'int');
     bless $self, $class;
-    $self->initialize();
+
+    $self->get_column (4)->get_cell_renderers()->set_property ('xalign', 1.0);
+    $self->get_selection->set_mode ('browse');
+    $self->signal_connect (row_activated => sub { print "change date\n" });
+
+    # Fake data
+    @{$self->{data}} = 
+	( [ 1, 'Lenni ist wie ein Schwein', 
+	    '/home/Gemeinsame Dateien/Foto/Original', 
+	    '${EXIF:DateTimeOriginal:Year}/${EXIF:}-$', 
+	    35 ],
+	  [ 2, 'Ebay-Verkäufe', 
+	    '/home/Gemeinsame Dateien/Foto/Original',
+	    '${EXIF:DateTimeOriginal:Year}/${EXIF:}-$', 
+	    5 ],
+	  [ 3, 'Testbilder neues Objektiv', 
+	    '/home/Gemeinsame Dateien/Foto/Original',
+	    '${EXIF:DateTimeOriginal:Year}/${EXIF:}-$', 
+	    21 ] );
+
     return $self;
 }
 
@@ -876,41 +1292,353 @@ sub make
 
 ######################################################################
 ##
-##  Main
+##  Widget for the work progress bar
 ##
-######################################################################
 
-package main;
+package Dimagso::WorkProgress;
 
 use strict;
-use Error qw(:try :warndie);
 use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::ProgressBar);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::ProgressBar->new;
+    return $self;
+}
+
+
+
+######################################################################
+package Dimagso::RenameButton;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::Button);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Button->new_with_label ('Rename');
+    bless $self, $class;
+    return $self;
+}
+
+
+
+######################################################################
+package Dimagso::CopyButton;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::Button);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Button->new_with_label ('Copy');
+    bless $self, $class;
+    return $self;
+}
+
+
+
+######################################################################
+package Dimagso::MoveButton;
+
+use strict;
+use Gtk2;
+use base qw(Gtk2::Button);
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Button->new_with_label ('Move');
+    bless $self, $class;
+    return $self;
+}
+
+
+
+######################################################################
+package Dimagso::MainWindow;
+
+use strict;
+use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::Window);
+
+my $default_width = 1024;
+my $default_height = 768;
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::Window->new ('toplevel');
+    $self->{ADDER} = {};
+    bless $self, $class;
+
+    $self->set_size_request ($default_width, $default_height);
+    $self->signal_connect (delete_event => sub { return 0 });
+    $self->signal_connect (destroy      => sub { Gtk2->main_quit });
+
+    return $self;
+}
+
+sub layout_widgets 
+{
+    my $self = shift;
+    my %widgets = @_;
+   
+    # The main window contains a vbox for all other widgets.
+
+    my $window_vbox = Gtk2::VBox->new (FALSE, 0);
+    $self->add ($window_vbox);
+
+    # The vbox contains a menu bar, a tool bar, a hpaned for the rest
+    # of the window and a status bar.
+
+    my $hpaned = Gtk2::HPaned->new;
+
+    $window_vbox->pack_start ($widgets{menubar},   FALSE, FALSE, 0);
+    $window_vbox->pack_start ($widgets{toolbar},   FALSE, FALSE, 0);
+    $window_vbox->pack_start ($hpaned,             TRUE,  TRUE,  0);
+    $window_vbox->pack_start ($widgets{statusbar}, FALSE, FALSE, 0);
+
+    # The horizontal paned contains a vbox on the left side and a
+    # vertical paned on the right side.
+
+    my $left_vbox = Gtk2::VBox->new (FALSE, 5);
+    $left_vbox->set_border_width (5);
+    my $vpaned = Gtk2::VPaned->new;
+
+    $hpaned->add1 ($left_vbox);
+    $hpaned->add2 ($vpaned);
+
+    # The vbox on the left side contains a hbox for the selection
+    # table, a scrolled list for the iconlist and a button box for the
+    # buttons of the icon view.
+
+    my $selection_hbox = Gtk2::HBox->new (FALSE, 0);
+
+    my $left_scrolledw = Gtk2::ScrolledWindow->new (undef, undef);
+    $left_scrolledw->set_size_request (540, 300);
+    $left_scrolledw->set_shadow_type ('etched-in');
+    $left_scrolledw->set_policy ('never', 'always');
+
+    my $left_hbbox = Gtk2::HButtonBox->new;
+    $left_hbbox->set_layout ('center');
+    $left_hbbox->set_spacing (10);
+
+    $left_vbox->pack_start ($selection_hbox, FALSE, FALSE, 0);
+    $left_vbox->pack_start ($left_scrolledw, TRUE,  TRUE,  0);
+    $left_vbox->pack_start ($left_hbbox,     FALSE, FALSE, 5);
+
+    # The hbox for the selection table contains only the selection
+    # table.
+
+    my $selection_table = LabeledWidgetArray->new 
+	(orientation => 'horizontal',
+	 size        => 4);
+    $selection_hbox->pack_start ($selection_table, FALSE, FALSE, 0);
+
+    # The selection table contains the selection widgets for the
+    # directory, date, hide status and sort attribute.
+
+    $selection_table->add_labeled_widget ('Directory:', $widgets{dirchooser});
+    $selection_table->add_labeled_widget ('Date:',      $widgets{datesel});
+    $selection_table->add_labeled_widget ('Hide:',      $widgets{hidesel});
+    $selection_table->add_labeled_widget ('Sort by:',   $widgets{sortsel});
+
+    # The scrolled window contains the icon view for the images.
+
+    $left_scrolledw->add ($widgets{iconview});
+
+    # The button box contains the following buttons.
+
+    $left_hbbox->add ($widgets{select_all_button});
+    $left_hbbox->add ($widgets{select_none_button});
+    $left_hbbox->add ($widgets{create_job_button});
+    $left_hbbox->add ($widgets{add_to_job_button});
+
+    # Vbox for the job list scrolled window and the button bar
+
+    my $topright_vbox = Gtk2::VBox->new (FALSE, 5);
+    $vpaned->add1 ($topright_vbox);
+    $topright_vbox->set_border_width (5);
+
+    # Scrolled window for the job list
+
+    my $topright_scrolledw = Gtk2::ScrolledWindow->new;
+    $topright_vbox->pack_start ($topright_scrolledw, TRUE, TRUE, 0);
+    $topright_scrolledw->set_size_request (400, 200);
+    $topright_scrolledw->set_shadow_type ('etched-in');
+    $topright_scrolledw->set_policy ('automatic', 'always');
+
+    # Listbox for the jobs in the top part of the Vpaned
+
+    $topright_scrolledw->add ($widgets{joblist});
+
+    # Buttons for the job list
+
+    my $topright_hbbox = Gtk2::HButtonBox->new;
+    $topright_vbox->pack_start ($topright_hbbox, FALSE, FALSE, 5);
+    $topright_hbbox->set_layout ('center');
+    $topright_hbbox->set_spacing (10);
+    $topright_hbbox->add (Gtk2::Button->new_with_label ('Move up'));
+    $topright_hbbox->add (Gtk2::Button->new_with_label ('Move down'));
+    $topright_hbbox->add (Gtk2::Button->new_with_label ('Delete'));
+    
+    # Vbox for work list
+
+    my $bottomright_vbox = Gtk2::VBox->new (FALSE, 5);
+    $vpaned->add2 ($bottomright_vbox);
+    $bottomright_vbox->set_border_width (5);
+    
+    # Scrolled window for the transformation rules of the work list
+
+    my $bottomright_scrolledw = Gtk2::ScrolledWindow->new;
+    $bottomright_vbox->pack_start ($bottomright_scrolledw, TRUE, TRUE, 0);
+    $bottomright_scrolledw->set_size_request (400, 200);
+    $bottomright_scrolledw->set_shadow_type ('etched-in');
+    $bottomright_scrolledw->set_policy ('automatic', 'always');
+    
+    # Work list
+
+    $bottomright_scrolledw->add ($widgets{worklist});
+    
+    # Progress bar for transformation
+
+    $bottomright_vbox->pack_start ($widgets{workprogress}, FALSE, FALSE, 0);
+    
+    # Buttons for transformation list
+
+    my $bottomright_hbbox = Gtk2::HButtonBox->new;
+    $bottomright_vbox->pack_start ($bottomright_hbbox, FALSE, FALSE, 5);
+    $bottomright_hbbox->set_layout ('center');
+    $bottomright_hbbox->set_spacing (10);
+    $bottomright_hbbox->add ($widgets{rename_button});
+    $bottomright_hbbox->add ($widgets{copy_button});
+    $bottomright_hbbox->add ($widgets{move_button});
+
+    return undef;
+}
+
+
+
+######################################################################
+##
+##  Base package for the application
+##
+
+package Dimagso;
+
+use strict;
+use Getopt::Long;
+use Error qw(:try :warndie);
 use Gtk2 -init;
-use Gtk2::SimpleList;
 use Cwd qw(getcwd);
 
+
+my $OPTIONS = {config_file => 'dimagso.cfg',
+	       image_dir   => getcwd};
+sub options { return $OPTIONS; }
+
 my $VERSION = '0.1';
+sub version { return $VERSION; }
 
-sub show_about_dialog
+#my $LOGGER = { my $msg; sub { $msg = join ('', @_) if @_; return $msg; }; }
+my $LOGGER = sub { };
+sub logger { return &$LOGGER(@_); }
+
+my $CONFIG = undef;
+sub config
 {
-    my $about = Gtk2::AboutDialog->new;
-    $about->set_program_name ('Dimagso');
-    $about->set_version ($VERSION);
-    $about->set_copyright ('(c) Sascha Ziemann');
-    $about->set_comments ('A tool to sort digital images.');
-    $about->set_website ('http://vs301.hello-server.com/~szi/computer/');
-    $about->run;
-    $about->destroy;
+    $CONFIG->set (@_) if @_;
+    return $CONFIG->tree;
+}
+my $WINDOW = undef;
+sub window { return $WINDOW; }
+
+sub finish
+{
+    return sub {
+	print map { $_, "\n" } @_;
+	exit;
+    };
 }
 
-sub show_filechooser_dialog
+sub read_options 
 {
-
+    GetOptions 
+	('help' =>
+	 finish ('Dimagso version ' . version,
+		 'Options:',
+		 '  --help      Display usage',
+		 '  --version   Display version information'),
+	 'version' => 
+	 finish ('Dimagso version ', version),
+	 'config-file' => \$OPTIONS->{config_file},
+	 'image-dir'   => \$OPTIONS->{image_dir},
+	) || die 'Can not read command line options.';
 }
 
-sub create_menubar 
+sub read_config
 {
-    my $menu_definition = 
+    $CONFIG = AppConfig->new (tree => {default => 1},
+			      filename => $OPTIONS->{config_file});
+    try { $CONFIG->read; }
+    catch Error with {
+	# Init configuration
+	warn "Initializing a new configuration";
+	$CONFIG->set ([qw (jobs recent 0)], 'Lennart eats like a pig');
+	$CONFIG->set ([qw (jobs recent 1)], 'Macros of a bie');
+	$CONFIG->set ([qw (jobs recent 2)], 'Christmas day 1');
+	$CONFIG->set ([qw (jobs recent 3)], 'Christmas day 2');
+	$CONFIG->set ([qw (dirs recent 0)], '/home/szi/Foto/Original');
+	$CONFIG->set ([qw (dirs recent 1)], '/home/Gemeinsame Dateien/Foto/Original');
+	$CONFIG->set ([qw (rules 0 name)], 'Move images');
+	$CONFIG->set ([qw (rules 0 dir)],  '/home/Gemeinsame Dateien/Foto/Original');
+	$CONFIG->set ([qw (rules 0 ren)],  '');
+    };
+    return undef;
+}
+
+sub create_gui
+{
+    # Create widgets
+    $WINDOW = Dimagso::MainWindow->new;
+    my %widgets = (menubar            => Dimagso::MenuBar->new,
+		   toolbar            => Dimagso::ToolBar->new,
+		   dirchooser         => Dimagso::DirChooserButton->new,
+		   datesel            => Dimagso::DateSelection->new,
+		   hidesel            => Dimagso::HideSelection->new,
+		   sortsel            => Dimagso::SortSelection->new,
+		   statusbar          => Dimagso::StatusBar->new,
+		   iconview           => Dimagso::SourceIconView->new,
+		   select_all_button  => Dimagso::SelectAllButton->new,
+		   select_none_button => Dimagso::SelectNoneButton->new,
+		   create_job_button  => Dimagso::CreateJobButton->new,
+		   add_to_job_button  => Dimagso::AddToJobButton->new,
+		   joblist            => Dimagso::JobList->new,
+		   worklist           => Dimagso::WorkList->new,
+		   workprogress       => Dimagso::WorkProgress->new,
+		   rename_button      => Dimagso::RenameButton->new,
+		   copy_button        => Dimagso::CopyButton->new,
+		   move_button        => Dimagso::MoveButton->new,
+	);
+    $WINDOW->layout_widgets (%widgets);
+
+    # Define logger
+    my $logger = $widgets{statusbar}->make_logger;
+    &$logger (logger);
+    $LOGGER = $logger;
+
+    # Interconnect the widgets
+
+    $widgets{menubar}->define (
 	[{ label => '_File',
 	   menu  => 
 	       [{ label => 'Empty',
@@ -943,332 +1671,71 @@ sub create_menubar
 	 { label => '_Help',
 	   menu  => 
 	       [{ label => '_About',
-		  action => \&show_about_dialog,
+		  action => sub { Dimagso::AboutDialog->show },
 		  icon   => 'gtk-about' }
 	       ]}
-	];
+	]);
 
-    my $menubar = Gtk2::MenuBar->new;
+    $widgets{toolbar}->define
+	([{ stock => 'gtk-about',
+	    action => sub { Dimagso::AboutDialog->show } }
+	 ]);
 
-    foreach my $menuitem_def (@$menu_definition)
-    {
-	my $menuitem = Gtk2::MenuItem->new_with_mnemonic ($menuitem_def->{label});
-	$menubar->append ($menuitem);
-	my $menu = Gtk2::Menu->new;
-	$menuitem->set_submenu ($menu);
+    $widgets{iconview}->set_set_dates 
+	(sub { $widgets{datesel}->set_dates (@_) });
 
-	foreach my $submenuitem_def (@{$menuitem_def->{menu}})
+    $widgets{select_all_button}->signal_connect 
+	(clicked => sub { $widgets{iconview}->select_all });
+    $widgets{select_none_button}->signal_connect 
+	(clicked => sub { $widgets{iconview}->unselect_all });
+    $widgets{create_job_button}->signal_connect 
+	(clicked => sub {
+	    Dimagso::JobDialog->show
+		(files  => $widgets{iconview}->get_selected_files);
+	 });
+
+    # Update icon view when date selection changes
+    $widgets{dirchooser}->signal_connect (
+	'current-folder-changed' => sub 
 	{
-	    my $submenuitem;
-	    
-	    if (exists $submenuitem_def->{icon})
-	    {
-		$submenuitem = Gtk2::ImageMenuItem->new_from_stock 
-		    ($submenuitem_def->{icon});
-	    }
-	    else
-	    {
-		$submenuitem = Gtk2::MenuItem->new ($submenuitem_def->{label});
-	    }
-	    $menu->append ($submenuitem);
-	    $submenuitem->signal_connect 
-		(activate => $submenuitem_def->{action});
-	}
-    }
+	    my $dir = $widgets{dirchooser}->get_current_folder;
+	    return if $widgets{iconview}->get_directory eq $dir;
+	    $widgets{iconview}->read_directory ($dir);
+	});
+    $widgets{datesel}->signal_connect 
+	(changed => sub { $widgets{iconview}->set_date ($widgets{datesel}->get_active_text) });
+    $widgets{sortsel}->signal_connect
+	(changed => sub { my %col = (0 => 'datetime', 
+				     1 => 'filename');
+			  $widgets{iconview}->sort_by ($col{$widgets{sortsel}->get_active},
+					      'ascending') }),
+    # Read directory
+    $widgets{dirchooser}->set_current_folder ($OPTIONS->{image_dir});
+    $widgets{iconview}->read_directory ($OPTIONS->{image_dir});
 
-    return $menubar;
-}
-
-
-sub create_toolbar
-{
-    my $toolbar_definition = 
-	[{ stock => 'gtk-open',
-	   action => sub { Gtk2->main_quit } }
-	];
-
-    my $toolbar = Gtk2::Toolbar->new;
-
-    foreach my $toolbar_item (@$toolbar_definition)
-    {
-	my $item = Gtk2::ToolButton->new_from_stock ($toolbar_item->{stock});
-	$toolbar->insert ($item, -1);
-	$item->signal_connect (clicked => $toolbar_item->{action});
-    }
-
-    return $toolbar;
-}
-
-
-sub show_new_job_dialog
-{
-    my %args = @_;
-
-    my $dialog = Gtk2::Dialog->new_with_buttons 
-	('Create a new job',
-	 $args{window},
-	 [qw(modal destroy-with-parent)],
-	 'gtk-ok'     => 'accept',
-	 'gtk-cancel' => 'reject');
-    $dialog->set_default_response ('accept');
-
-    my $table = LabeledWidgetArray->new 
-	(orientation => 'vertical',
-	 size        => 3);
-    $dialog->vbox->add ($table);
-    $table->set_border_width (5);
-
-    my $combo = Gtk2::ComboBoxEntry->new_text;
-    foreach (@{$args{jobs}})
-    {
-	$combo->append_text ($_);
-    }
-    $table->add_labeled_widget ('Job description:',       $combo);
-    $table->add_labeled_widget ('Destination directory:', Gtk2::Entry->new);
-    $table->add_labeled_widget ('Renaming rule:',         Gtk2::Entry->new);
-
-    $dialog->vbox->show_all;
-    my $result = $dialog->run;
-
-    if ($result eq 'accept')
-    {
-	# Add job
-	
-    }
-
-    $dialog->destroy;
     return undef;
 }
 
-
-sub create_main_window
+sub run
 {
-    my %args = @_;
-
-    my $default_width = 1024;
-    my $default_height = 768;
-
-    # Main window
-    my $window = Gtk2::Window->new ('toplevel');
-    $window->set_size_request ($default_width, $default_height);
-    $window->signal_connect (delete_event => sub { return 0 });
-    $window->signal_connect (destroy => sub { Gtk2->main_quit });
-    my $window_vbox = Gtk2::VBox->new (FALSE, 0);
-    $window->add ($window_vbox);
-
-    # Menu bar
-    $window_vbox->pack_start (create_menubar, FALSE, FALSE, 0);
-
-    # Tool bar
-#    $window_vbox->pack_start (create_toolbar, FALSE, FALSE, 0);
-
-    # Global Hpaned
-    my $hpaned = Gtk2::HPaned->new;
-    $window_vbox->pack_start ($hpaned, TRUE, TRUE, 0);
-    
-    # Vbox for the left side of the HPaned
-    my $left_vbox = Gtk2::VBox->new (FALSE, 5);
-    $hpaned->add1 ($left_vbox);
-    $left_vbox->set_border_width (5);
-    
-    # Table for the selection combos
-    my $selection_hbox = Gtk2::HBox->new (FALSE, 0);
-    $left_vbox->pack_start ($selection_hbox, FALSE, FALSE, 0);
-    my $selection_table = LabeledWidgetArray->new 
-	(orientation => 'horizontal',
-	 size        => 4);
-    $selection_hbox->pack_start ($selection_table, FALSE, FALSE, 0);
-
-    # Directory selection
-    my $dirchooser = Gtk2::FileChooserButton->new ('Select a folder', 
-						   'select-folder');
-    $selection_table->add_labeled_widget ('Directory:', $dirchooser);
-    $dirchooser->set_current_folder ($args{directory});
-
-    # Date selection
-    my $datesel = DateSelection->new;
-    $selection_table->add_labeled_widget ('Date:', $datesel);
-
-    # Hide selection
-    my $hidesel = Gtk2::ComboBox->new_text;
-    $hidesel->append_text ('assigned');
-    $hidesel->append_text ('none');
-    $hidesel->set_active (0);
-    $selection_table->add_labeled_widget ('Hide:', $hidesel);
-
-    # Sort selection
-    my $sortsel = Gtk2::ComboBox->new_text;
-    $sortsel->append_text ('Date');
-    $sortsel->append_text ('File name');
-    $sortsel->set_active (0);
-    $selection_table->add_labeled_widget ('Sort by:', $sortsel);
-
-    # Icon view for the images, which should be moved
-    my $left_scrolledw = Gtk2::ScrolledWindow->new (undef, undef);
-    $left_vbox->pack_start ($left_scrolledw, TRUE, TRUE, 0);
-    $left_scrolledw->set_size_request (540, 300);
-    $left_scrolledw->set_shadow_type ('etched-in');
-    $left_scrolledw->set_policy ('never', 'always');
-    my $iconview = SourceIconView->new;
-    $left_scrolledw->add ($iconview);
-    $iconview->set_set_dates (sub { $datesel->set_dates (@_) });
-
-    # Buttons for the icon view
-    my $left_hbbox = Gtk2::HButtonBox->new;
-    $left_vbox->pack_start ($left_hbbox, FALSE, FALSE, 5);
-    $left_hbbox->set_layout ('center');
-    $left_hbbox->set_spacing (10);
-
-    my $select_all_button = Gtk2::Button->new_with_label ('Select all');
-    $left_hbbox->add ($select_all_button);
-    $select_all_button->signal_connect (clicked => sub { $iconview->select_all });
-
-    my $select_none_button = Gtk2::Button->new_with_label ('Select none');
-    $left_hbbox->add ($select_none_button);
-    $select_none_button->signal_connect (clicked => sub { $iconview->unselect_all });
-
-    my $new_job_button = Gtk2::Button->new_with_label ('Create new job');
-    $left_hbbox->add ($new_job_button);
-    $new_job_button->signal_connect 
-	(clicked => sub 
-	 {
-	     show_new_job_dialog 
-		 (window => $window,
-		  files  => $iconview->get_selected_files,
-		  jobs   => [sort values %{$args{config}->{TREE}->{jobs}->{recent}}]);
-	 });
-    $left_hbbox->add (Gtk2::Button->new_with_label ('Add to job'));
-
-    # Vpaned for the right side of the Hpaned
-    my $vpaned = Gtk2::VPaned->new;
-    $hpaned->add2 ($vpaned);
-
-    # Vbox for the job list scrolled window and the button bar
-    my $topright_vbox = Gtk2::VBox->new (FALSE, 5);
-    $vpaned->add1 ($topright_vbox);
-    $topright_vbox->set_border_width (5);
-
-    # Scrolled window for the job list
-    my $topright_scrolledw = Gtk2::ScrolledWindow->new;
-    $topright_vbox->pack_start ($topright_scrolledw, TRUE, TRUE, 0);
-    $topright_scrolledw->set_size_request (400, 200);
-    $topright_scrolledw->set_shadow_type ('etched-in');
-    $topright_scrolledw->set_policy ('automatic', 'always');
-
-    # Listbox for the jobs in the top part of the Vpaned
-    my $joblist = JobList->new;
-    $topright_scrolledw->add ($joblist);
-
-    # Buttons for the job list
-    my $topright_hbbox = Gtk2::HButtonBox->new;
-    $topright_vbox->pack_start ($topright_hbbox, FALSE, FALSE, 5);
-    $topright_hbbox->set_layout ('center');
-    $topright_hbbox->set_spacing (10);
-    $topright_hbbox->add (Gtk2::Button->new_with_label ('Move up'));
-    $topright_hbbox->add (Gtk2::Button->new_with_label ('Move down'));
-    $topright_hbbox->add (Gtk2::Button->new_with_label ('Delete'));
-    
-    # Vbox for transformation list
-    my $bottomright_vbox = Gtk2::VBox->new (FALSE, 5);
-    $vpaned->add2 ($bottomright_vbox);
-    $bottomright_vbox->set_border_width (5);
-    
-    # Scrolled window for the transformation rules
-    my $bottomright_scrolledw = Gtk2::ScrolledWindow->new;
-    $bottomright_vbox->pack_start ($bottomright_scrolledw, TRUE, TRUE, 0);
-    $bottomright_scrolledw->set_size_request (400, 200);
-    $bottomright_scrolledw->set_shadow_type ('etched-in');
-    $bottomright_scrolledw->set_policy ('automatic', 'always');
-    
-    # Transformation list
-    my $trans_list = Gtk2::SimpleList->new ('Job'         => 'int',
-					    'Source'      => 'text',
-					    'Destination' => 'text');
-    $bottomright_scrolledw->add ($trans_list);
-    $trans_list->get_selection->set_mode ('browse');
-    $trans_list->signal_connect (row_activated => sub { print "change date\n" });
-    @{$trans_list->{data}} = 
-	( [ 1, '/media/EOS/dcim/IMG_1111.CR2', 
-	    '/home/Gemeinsame Dateien/Fotos/2009/2006-10-26/CR2/IMG_1111.CR2' ],
-	  [ 1, '/media/EOS/dcim/IMG_1112.CR2', 
-	    '/home/Gemeinsame Dateien/Fotos/2009/2006-10-26/CR2/IMG_1112.CR2' ],
-	  [ 1, '/media/EOS/dcim/IMG_1113.CR2', 
-	    '/home/Gemeinsame Dateien/Fotos/2009/2006-10-26/CR2/IMG_1113.CR2' ] );
-    
-    # Progress bar for transformation
-    my $progress = Gtk2::ProgressBar->new;
-    $bottomright_vbox->pack_start ($progress, FALSE, FALSE, 0);
-    
-    # Buttons for transformation list
-    my $bottomright_hbbox = Gtk2::HButtonBox->new;
-    $bottomright_vbox->pack_start ($bottomright_hbbox, FALSE, FALSE, 5);
-    $bottomright_hbbox->set_layout ('center');
-    $bottomright_hbbox->set_spacing (10);
-    $bottomright_hbbox->add (Gtk2::Button->new_with_label ('Rename'));
-    $bottomright_hbbox->add (Gtk2::Button->new_with_label ('Copy'));
-    $bottomright_hbbox->add (Gtk2::Button->new_with_label ('Move'));
-
-    # Status bar
-    my $statusbar = Gtk2::Statusbar->new;
-    $window_vbox->pack_start ($statusbar, FALSE, FALSE, 0);
-    $statusbar->set_property ('has-resize-grip', FALSE);
-    my $context_id = $statusbar->get_context_id ('');
-    my $logger = sub 
-    {
-	my ($message) = @_;
-	$statusbar->push ($context_id, $message);
-    };
-    $iconview->set_logger ($logger);
-
-    # Update icon view when date selection changes
-    $dirchooser->signal_connect (
-	'current-folder-changed' => sub 
-	{
-	    my $dir = $dirchooser->get_current_folder;
-	    return if $iconview->get_directory eq $dir;
-	    $iconview->read_directory ($dir);
-	});
-    $datesel->signal_connect 
-	(changed => sub { $iconview->set_date ($datesel->get_active_text) });
-    $sortsel->signal_connect
-	(changed => sub { my %col = (0 => 'datetime', 
-				     1 => 'filename');
-			  $iconview->sort_by ($col{$sortsel->get_active},
-					      'ascending') }),
-    
-    # Read directory
-    $iconview->read_directory ($args{directory});
-
-
-    $window->show_all;
-    return $window;
+    $WINDOW->show_all;
+    Gtk2->main;
 }
 
-# Load configuration
-my $config = Config->new (tree => {default => 1},
-			  filename => 'dimagso.cfg');
-try { $config->read; }
-catch Error with {
-    # Init configuration
-    warn "Initializing a new configuration";
-    $config->set ([qw (jobs recent 0)], 'Lennart eats like a pig');
-    $config->set ([qw (jobs recent 1)], 'Macros of a bie');
-    $config->set ([qw (jobs recent 2)], 'Christmas day 1');
-    $config->set ([qw (jobs recent 3)], 'Christmas day 2');
-    $config->set ([qw (dirs recent 0)], '/home/szi/Foto/Original');
-    $config->set ([qw (dirs recent 1)], '/home/Gemeinsame Dateien/Foto/Original');
-    $config->set ([qw (rules 0 name)], 'Move images');
-    $config->set ([qw (rules 0 dir)],  '/home/Gemeinsame Dateien/Foto/Original');
-    $config->set ([qw (rules 0 ren)],  '');
-};
 
-use Data::Dumper;
-print Dumper ($config->{TREE});
+
+######################################################################
+package main;
 
-# Start GUI
-create_main_window (directory => getcwd,
-		    config => $config);
-Gtk2->main;
+use strict;
 
-# Write changed configuration
-$config->write;
+Dimagso::read_options;
+Dimagso::read_config;
+Dimagso::create_gui;
+
+#use Data::Dumper;
+#my $cfg = Dimagso::config;
+#print Dumper ($cfg);
+#exit;
+
+Dimagso::run;
