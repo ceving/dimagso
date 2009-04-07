@@ -2,7 +2,7 @@
 ##
 ## Dimagso - A tool to sort digital images
 ##
-## Time-stamp: <2009-04-06 17:49:32 szi>
+## Time-stamp: <2009-04-07 17:46:09 szi>
 ##
 ## Sascha Ziemann <ceving@gmail.com>
 ##
@@ -621,6 +621,7 @@ sub new
     return $self;
 }
 
+# FIXME: needs support for recursive menus
 sub define
 {
     my $self = shift;
@@ -753,6 +754,44 @@ sub show
 
 
 ######################################################################
+##
+##  Simple List Store
+##
+
+package SimpleListStore;
+
+use strict;
+use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::ListStore);
+use Carp;
+
+sub new
+{
+    my $class = shift;
+    my $types = shift;
+    my $self = Gtk2::ListStore->new (@$types);
+    bless $self, $class;
+    $self->append_rows (@_) if @_;
+    return $self;
+}
+
+sub append_rows
+{
+    my $self = shift;
+    my @rows = @_;
+
+    foreach my $row (@rows)
+    {
+	my $i = 0;
+	$self->set ($self->append, map {$i++, $_} @$row); 
+    }
+    return undef;
+}
+
+
+
+######################################################################
 package Dimagso::JobDialog;
 
 use strict;
@@ -774,36 +813,54 @@ sub show
 
     $self->set_default_response ('accept');
 
+    # Create layout
     my $table = LabeledWidgetArray->new 
 	(orientation => 'vertical',
 	 size        => 3);
     $self->vbox->add ($table);
     $table->set_border_width (5);
 
-    my $description_combo = Gtk2::ComboBoxEntry->new_text;
+    # Create job description selection
+#    my %jobs = %{Dimagso::config()->{jobs}->{recent}};
+#    my $job_list = SimpleListStore->new
+#	([qw(Glib::String Glib::Int)],
+#	 map {[$jobs{$_}, $_]} sort { $jobs{$a} cmp $jobs{$b} } keys %jobs);
+#    my $job_combo = Gtk2::ComboBoxEntry->new ($job_list, 0);
+
+    # Create rule selection
+    my $job_combo = Gtk2::ComboBoxEntry->new_text;
     foreach (sort values %{Dimagso::config()->{jobs}->{recent}}) {
-	$description_combo->append_text ($_);
+	$job_combo->append_text ($_);
     }
+
+    # Create directory selection
     my $directory_combo = Gtk2::ComboBoxEntry->new_text;
     foreach (sort values %{Dimagso::config()->{dirs}->{recent}}) {
 	$directory_combo->append_text ($_);
     }
+    
+    # Create rule selection
     my $rule_combo = Gtk2::ComboBoxEntry->new_text;
     foreach (sort map { $_->{name} } values %{Dimagso::config()->{rules}->{recent}}) {
 	$rule_combo->append_text ($_);
     }
 
-    $table->add_labeled_widget ('Job description:',       $description_combo);
+    # Layout widgets
+    $table->add_labeled_widget ('Job description:',       $job_combo);
     $table->add_labeled_widget ('Destination directory:', $directory_combo);
     $table->add_labeled_widget ('Transformation rule:',   $rule_combo);
 
+    # Open dialog box
     $self->vbox->show_all;
     my $result = $self->run;
 
     if ($result eq 'accept')
     {
 	# Add job
-	
+	print 
+	    "Description: '", $job_combo->get_active_text, "'\n",
+	    "Directory:   '", $directory_combo->get_active_text, "'\n",
+	    "Rule:        '", $rule_combo->get_active_text, "'\n";
     }
 
     $self->destroy;
@@ -833,7 +890,6 @@ sub new
 
     my %args = @_;
 
-#    $self->{LOGGER}    = $args{logger};
     $self->{DIRECTORY} = $args{directory};
     $self->{SET_DATES} = $args{set_dates}; # function to update the list of dates
 
@@ -1035,7 +1091,6 @@ sub new
 {
     my $class = shift;
     my $self  = Gtk2::ComboBox->new_text (@_);
-
     bless $self, $class;
     return $self;
 }
@@ -1666,7 +1721,16 @@ sub create_gui
 	   menu  => 
 	       [{ label => '_Preferences',
 		  action => sub {  },
-		  icon   => 'gtk-preferences' }
+		  icon   => 'gtk-preferences' },
+		{ label => 'Manage recent...',
+		  menu =>
+		      [{ label => 'Jobs',
+			 action => sub { } },
+		       { label => 'Directories',
+			 action => sub { } },
+		       { label => 'Rules',
+			 action => sub { } }
+		      ]}
 	       ]},
 	 { label => '_Help',
 	   menu  => 
