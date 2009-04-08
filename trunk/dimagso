@@ -2,7 +2,7 @@
 ##
 ## Dimagso - A tool to sort digital images
 ##
-## Time-stamp: <2009-04-07 17:46:09 szi>
+## Time-stamp: <2009-04-08 17:09:26 szi>
 ##
 ## Sascha Ziemann <ceving@gmail.com>
 ##
@@ -610,6 +610,7 @@ sub add_labeled_widget
 package Dimagso::MenuBar;
 
 use strict;
+use Carp;
 use Gtk2;
 use base qw(Gtk2::MenuBar);
 
@@ -621,39 +622,38 @@ sub new
     return $self;
 }
 
-# FIXME: needs support for recursive menus
+sub add_menuitem
+{
+    my $menu = shift;
+    my $definition = shift;
+
+    my $item = exists $definition->{icon} ?
+	Gtk2::ImageMenuItem->new_from_stock ($definition->{icon}) :
+	Gtk2::MenuItem->new_with_mnemonic ($definition->{label});
+    $menu->append ($item);
+
+    if (exists $definition->{menu}) {
+	my $submenu = Gtk2::Menu->new;
+	$item->set_submenu ($submenu);
+	foreach my $def (@{$definition->{menu}}) {
+	    add_menuitem ($submenu, $def); } }
+    elsif (exists $definition->{action}) {
+	$item->signal_connect (activate => $definition->{action}); }
+    else {
+	croak "No menu and no action attribute."; }
+
+    return undef;
+}
+
 sub define
 {
     my $self = shift;
-    my $menu_definition = shift;
+    my $definition = shift;
 
-    foreach my $menuitem_def (@$menu_definition)
-    {
-	my $menuitem = Gtk2::MenuItem->new_with_mnemonic ($menuitem_def->{label});
-	$self->append ($menuitem);
-	my $menu = Gtk2::Menu->new;
-	$menuitem->set_submenu ($menu);
-
-	foreach my $submenuitem_def (@{$menuitem_def->{menu}})
-	{
-	    my $submenuitem;
-	    
-	    if (exists $submenuitem_def->{icon})
-	    {
-		$submenuitem = Gtk2::ImageMenuItem->new_from_stock 
-		    ($submenuitem_def->{icon});
-	    }
-	    else
-	    {
-		$submenuitem = Gtk2::MenuItem->new ($submenuitem_def->{label});
-	    }
-	    $menu->append ($submenuitem);
-	    $submenuitem->signal_connect 
-		(activate => $submenuitem_def->{action});
-	}
-    }
-
-    return undef;
+    foreach my $def (@$definition) {
+	add_menuitem ($self, $def); }
+ 
+   return undef;
 }
 
 
@@ -1722,14 +1722,14 @@ sub create_gui
 	       [{ label => '_Preferences',
 		  action => sub {  },
 		  icon   => 'gtk-preferences' },
-		{ label => 'Manage recent...',
+		{ label => '_Manage recent...',
 		  menu =>
-		      [{ label => 'Jobs',
-			 action => sub { } },
-		       { label => 'Directories',
-			 action => sub { } },
-		       { label => 'Rules',
-			 action => sub { } }
+		      [{ label => '_Jobs',
+			 action => sub { print "Jobs\n" } },
+		       { label => '_Directories',
+			 action => sub { print "Dirs\n" } },
+		       { label => '_Rules',
+			 action => sub { print "Rules\n" } }
 		      ]}
 	       ]},
 	 { label => '_Help',
