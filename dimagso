@@ -2,7 +2,7 @@
 ##
 ## Dimagso - A tool to sort digital images
 ##
-## Time-stamp: <2009-04-08 17:09:26 szi>
+## Time-stamp: <2009-04-10 18:47:38 szi>
 ##
 ## Sascha Ziemann <ceving@gmail.com>
 ##
@@ -14,44 +14,44 @@
 ##
 ## The default package for Perl programs:
 ##
-##   main                       - Start of the program.
+##   main                        - Start of the program.
 ##
 ## Packages for application specific purposes:
 ##
-##   Dimagso                    - The application itself.
+##   Dimagso                     - The application itself.
 ##
-##   Dimagso::MainWindow        - Main window of the application.
-##   Dimagso::MenuBar           - Menu bar for the application.
-##   Dimagso::ToolBar           - Tool bar for the application.
-##   Dimagso::StatusBar         - Status bar for the application.
-##   Dimagso::SourceIconView    - Icon view to display images.
-##   Dimagso::DateSelection     - Selection for the date.
-##   Dimagso::DirChooserButton  - Selection of a directory.
-##   Dimagso::HideSelection     - Selection what should be hidden.
-##   Dimagso::SortSelection     - Selection how to sort.
-##   Dimagso::SelectAllButton   - Button to select all images.
-##   Dimagso::SelectNoneButton  - Button to remove selection.
-##   Dimagso::CreateJobButton   - Button to create a new job.
-##   Dimagso::AddToJobButton    - Button to add to an existing job.
-##   Dimagso::JobList           - List of defined jobs.
-##   Dimagso::WorkList          - List of work to be done.
-##   Dimagso::WorkProgress      - Progress meter for the work.
-##   Dimagso::RenameButton      - Button to rename the images.
-##   Dimagso::CopyButton        - Button to copy the images.
-##   Dimagso::MoveButton        - Button to move the images.
+##   Dimagso::MainWindow         - Main window of the application.
+##   Dimagso::MenuBar            - Menu bar for the application.
+##   Dimagso::ToolBar            - Tool bar for the application.
+##   Dimagso::StatusBar          - Status bar for the application.
+##   Dimagso::SourceIconView     - Icon view to display images.
+##   Dimagso::DateSelection      - Selection for the date.
+##   Dimagso::DirChooserButton   - Selection of a directory.
+##   Dimagso::HideSelection      - Selection what should be hidden.
+##   Dimagso::SortSelection      - Selection how to sort.
+##   Dimagso::SelectAllButton    - Button to select all images.
+##   Dimagso::SelectNoneButton   - Button to remove selection.
+##   Dimagso::CreateJobButton    - Button to create a new job.
+##   Dimagso::AddToJobButton     - Button to add to an existing job.
+##   Dimagso::JobList            - List of defined jobs.
+##   Dimagso::WorkList           - List of work to be done.
+##   Dimagso::WorkProgress       - Progress meter for the work.
+##   Dimagso::RenameButton       - Button to rename the images.
+##   Dimagso::CopyButton         - Button to copy the images.
+##   Dimagso::MoveButton         - Button to move the images.
 ##
-##   Dimagso::AboutDialog       - About dialgo.
-##   Dimagso::JobDialog         - Job dialog.
+##   Dimagso::AboutDialog        - About dialgo.
+##   Dimagso::JobDialog          - Job dialog.
 ##
 ## Packages for GTK+ specific purposes:
 ##
-##   LabeledWidgetArray         - Align widgets and labels.
+##   Dimagso::LabeledWidgetArray - Align widgets and labels.
 ##
 ## Packages for general purposes:
 ##
-##   Config                     - Read and write configuration data.
-##   Sexpr                      - Read, write and evaluate simple expressions.
-##   NamedObject                - Create named objects.
+##   Dimagso::Config             - Read and write configuration data.
+##   Dimagso::Sexpr              - Read, write and evaluate simple expressions.
+##   NamedObject                 - Create named objects.
 ##
 ## The order of the packages in this file is a bit different, beacuse
 ## all packages are within one file.  This makes it neccessary, that
@@ -68,7 +68,7 @@
 ## Read and write configuration data
 ##
 
-package AppConfig;
+package Dimagso::Config;
 
 use strict;
 
@@ -250,7 +250,7 @@ sub read
 ## Parse, dump and evaluate simple expressions
 ##
 
-package Sexpr;
+package Dimagso::Sexpr;
 
 use strict;
 use Carp;
@@ -518,7 +518,7 @@ sub DESTROY
 ##  Widget to display a row of labeled widgets
 ##
 
-package LabeledWidgetArray;
+package Dimagso::LabeledWidgetArray;
 
 use strict;
 use Glib qw(TRUE FALSE);
@@ -627,8 +627,8 @@ sub add_menuitem
     my $menu = shift;
     my $definition = shift;
 
-    my $item = exists $definition->{icon} ?
-	Gtk2::ImageMenuItem->new_from_stock ($definition->{icon}) :
+    my $item = exists $definition->{stock} ?
+	Gtk2::ImageMenuItem->new_from_stock ($definition->{stock}) :
 	Gtk2::MenuItem->new_with_mnemonic ($definition->{label});
     $menu->append ($item);
 
@@ -724,6 +724,75 @@ sub make_logger
 
 
 ######################################################################
+package Dimagso::AskForDialog;
+
+use strict;
+use Carp;
+use Gtk2;
+use base qw(Gtk2::Dialog);
+
+sub show
+{
+    my $class = shift;
+    my $title = shift;
+    my @questions = @_;
+
+    my $self = Gtk2::Dialog->new_with_buttons
+	($title,
+	 Dimagso::window(),
+	 [qw(modal destroy-with-parent)],
+	 'gtk-ok'     => 'accept',
+	 'gtk-cancel' => 'reject');
+    bless $self, $class;
+
+    # Create table layout
+    my $table = Dimagso::LabeledWidgetArray->new 
+	(orientation => 'vertical',
+	 size        => 3);
+    $self->vbox->add ($table);
+    $table->set_border_width (5);
+
+    my @getters_accept; # function list to get accepted values
+    my @getters_reject; # function list to get rejected values
+
+    # Create a line in the table for each question.
+    foreach my $q (@questions)
+    {
+	my $widget = undef;
+
+	if ($q->{type} eq 'number') 
+	{
+	    $widget = Gtk2::SpinButton->new_with_range 
+		($q->{min}, $q->{max}, $q->{step}); 
+	    $widget->set_value ($q->{value});
+	    push @getters_accept, sub { $widget->get_value; };
+	    push @getters_reject, sub { $q->{value}; };
+	}
+	croak "Unknown question type '".$q->{type}."'"
+	    unless defined $widget;
+	$table->add_labeled_widget ($q->{label}, $widget);
+    }
+
+    # Open dialog box
+    $self->set_default_response ('accept');
+    $self->vbox->show_all;
+    my $result = $self->run;
+
+    # Read values
+    my @values = ();
+    if ($result eq 'accept') {
+	@values = map { &$_ } @getters_accept; }
+    else {
+	@values = map { &$_ } @getters_reject; }
+
+    $self->destroy;
+
+    return @values;
+}
+
+
+
+######################################################################
 ##
 ##  Dimagso About Dialog
 ##
@@ -792,7 +861,10 @@ sub append_rows
 
 
 ######################################################################
+
 package Dimagso::JobDialog;
+
+# The job dialog creates a new job in the job list.
 
 use strict;
 use Gtk2;
@@ -814,7 +886,7 @@ sub show
     $self->set_default_response ('accept');
 
     # Create layout
-    my $table = LabeledWidgetArray->new 
+    my $table = Dimagso::LabeledWidgetArray->new 
 	(orientation => 'vertical',
 	 size        => 3);
     $self->vbox->add ($table);
@@ -1494,7 +1566,7 @@ sub layout_widgets
     # The hbox for the selection table contains only the selection
     # table.
 
-    my $selection_table = LabeledWidgetArray->new 
+    my $selection_table = Dimagso::LabeledWidgetArray->new 
 	(orientation => 'horizontal',
 	 size        => 4);
     $selection_hbox->pack_start ($selection_table, FALSE, FALSE, 0);
@@ -1642,8 +1714,9 @@ sub read_options
 
 sub read_config
 {
-    $CONFIG = AppConfig->new (tree => {default => 1},
-			      filename => $OPTIONS->{config_file});
+    $CONFIG = Dimagso::Config->new 
+	(tree => {default => 1},
+	 filename => $OPTIONS->{config_file});
     try { $CONFIG->read; }
     catch Error with {
 	# Init configuration
@@ -1659,6 +1732,58 @@ sub read_config
 	$CONFIG->set ([qw (rules 0 ren)],  '');
     };
     return undef;
+}
+
+sub change_counter_jobs_total
+{
+    config()->{counters}->{jobs}->{total} =
+	(Dimagso::AskForDialog->show
+	 ('Enter number',
+	  {type  => 'number',
+	   label => 'Total number of jobs:',
+	   value => config()->{counters}->{jobs}->{total},
+	   min   => 0,
+	   max   => 2**32,
+	   step  => 1}))[0];
+}
+
+sub change_counter_jobs_per_day
+{
+    config()->{counters}->{jobs}->{per_day} =
+	(Dimagso::AskForDialog->show
+	 ('Enter number',
+	  {type  => 'number',
+	   label => 'Number of jobs per day:',
+	   value => config()->{counters}->{jobs}->{per_day},
+	   min   => 0,
+	   max   => 2**32,
+	   step  => 1}))[0];
+}
+
+sub change_counter_jobs_per_month
+{
+    config()->{counters}->{jobs}->{per_month} =
+	(Dimagso::AskForDialog->show
+	 ('Enter number',
+	  {type  => 'number',
+	   label => 'Number of jobs per month:',
+	   value => config()->{counters}->{jobs}->{per_month},
+	   min   => 0,
+	   max   => 2**32,
+	   step  => 1}))[0];
+}
+
+sub change_counter_jobs_per_year
+{
+    config()->{counters}->{jobs}->{per_year} =
+	(Dimagso::AskForDialog->show
+	 ('Enter number',
+	  {type  => 'number',
+	   label => 'Number of jobs per year:',
+	   value => config()->{counters}->{jobs}->{per_year},
+	   min   => 0,
+	   max   => 2**32,
+	   step  => 1}))[0];
 }
 
 sub create_gui
@@ -1696,52 +1821,63 @@ sub create_gui
     $widgets{menubar}->define (
 	[{ label => '_File',
 	   menu  => 
-	       [{ label => 'Empty',
+	       [{ label  => 'Empty',
 		  action => sub { } },
 		{ label  => '_Exec ute',
 		  action => sub { },
-		  icon   => 'gtk-execute' },
+		  stock  => 'gtk-execute' },
 		{ label  => '_Apply',
 		  action => sub { },
-		  icon   => 'gtk-apply' },
+		  stock  => 'gtk-apply' },
 		{ label  => '_Play',
 		  action => sub { },
-		  icon   => 'gtk-media-play' },
+		  stock  => 'gtk-media-play' },
 		{ label  => '_Jump',
 		  action => sub { },
-		  icon   => 'gtk-jump-to' },
+		  stock  => 'gtk-jump-to' },
 		{ label  => '_Ok',
 		  action => sub { },
-		  icon   => 'gtk-ok' },
+		  stock  => 'gtk-ok' },
 		{ label  => '_Quit',
 		  action => sub { Gtk2->main_quit },
-		  icon   => 'gtk-quit' }
+		  stock  => 'gtk-quit' }
 	       ]},
 	 { label => '_Options',
 	   menu  => 
-	       [{ label => '_Preferences',
-		  action => sub {  },
-		  icon   => 'gtk-preferences' },
-		{ label => '_Manage recent...',
-		  menu =>
-		      [{ label => '_Jobs',
-			 action => sub { print "Jobs\n" } },
-		       { label => '_Directories',
-			 action => sub { print "Dirs\n" } },
-		       { label => '_Rules',
-			 action => sub { print "Rules\n" } }
+	       [#{ stock  => 'gtk-preferences',
+		#  action => sub {  } },
+		{ label => 'R_ecent',
+		  menu  =>
+		      [{ label  => '_Jobs',
+			 action => sub { print "_Jobs\n" } },
+		       { label  => '_Directories',
+			 action => sub { print "_Directories\n" } }
+		      ]},
+		{ label  => '_Rules',
+		  action => sub { print "Rules\n" } },
+		{ label => '_Counter',
+		  menu  =>
+		      [{ label  => '_Total jobs',
+		         action => \&change_counter_jobs_total },
+		       { label  => 'Jobs per _day',
+			 action => \&change_counter_jobs_per_day },
+		       { label  => 'Jobs per _month',
+			 action => \&change_counter_jobs_per_month },
+		       { label  => 'Jobs per _year',
+			 action => \&change_counter_jobs_per_year }
 		      ]}
 	       ]},
 	 { label => '_Help',
 	   menu  => 
-	       [{ label => '_About',
-		  action => sub { Dimagso::AboutDialog->show },
-		  icon   => 'gtk-about' }
+	       [{ stock  => 'gtk-about',
+		  action => sub { Dimagso::AboutDialog->show } },
+		{ label  => 'Updates',
+		  action => sub { print "check for updates\n" } },
 	       ]}
 	]);
 
     $widgets{toolbar}->define
-	([{ stock => 'gtk-about',
+	([{ stock  => 'gtk-about',
 	    action => sub { Dimagso::AboutDialog->show } }
 	 ]);
 
