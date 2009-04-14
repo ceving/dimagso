@@ -2,9 +2,22 @@
 ##
 ## Dimagso - A tool to sort digital images
 ##
-## Time-stamp: <2009-04-10 18:47:38 szi>
+## Time-stamp: <2009-04-14 21:54:39 szi>
 ##
-## Sascha Ziemann <ceving@gmail.com>
+## Copyright (C) 2009 Sascha Ziemann <ceving@gmail.com>
+##
+## This program is free software; you can redistribute it and/or
+## modify it under the terms of the GNU General Public License as
+## published by the Free Software Foundation; either version 3 of the
+## License, or (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful, but
+## WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+## General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, see <http://www.gnu.org/licenses/>.
 ##
 ##
 ## DOCUMENTATION
@@ -301,6 +314,18 @@ sub define
 	$self->{GENV}->{$_} = $args{$_};
     }
     return undef;
+}
+
+sub names
+{
+    my $self = shift;
+    return keys %{$self->{TREE}};
+}
+
+sub source
+{
+    my $self = shift;
+    return $self->{TREE}->{$_[0]};
 }
 
 sub evaluate
@@ -603,6 +628,85 @@ sub add_labeled_widget
 
 
 ######################################################################
+
+package Dimagso::ListStore;
+
+use strict;
+use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::ListStore);
+use Carp;
+
+sub new
+{
+    my $class = shift;
+    my $types = shift;
+    my $self = Gtk2::ListStore->new (@$types);
+    bless $self, $class;
+    $self->append_rows (@_) if @_;
+    return $self;
+}
+
+sub append_rows
+{
+    my $self = shift;
+    my @rows = @_;
+
+    foreach my $row (@rows) {
+	my $i = 0;
+	$self->set ($self->append, map {$i++, $_} @$row); }
+    return undef;
+}
+
+
+
+######################################################################
+
+package Dimagso::TreeStore;
+
+use strict;
+use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::TreeStore);
+use Carp;
+
+sub new
+{
+    my $class = shift;
+    my $self = Gtk2::TreeStore->new (@_);
+    bless $self, $class;
+    return $self;
+}
+
+sub append_tree
+{
+    my $self = shift;
+    my $attr = shift;
+    my $tree = shift;
+    my $iter = shift;
+
+    return unless defined $tree;
+
+    if (ref($tree) eq 'ARRAY') {
+	my $elem = shift @$tree;
+	croak 'Invalid reference type '.ref($elem).' of first array element.'
+	    unless ref($elem) eq 'HASH';
+	my $new_iter = $self->append ($iter);
+	$self->set ($new_iter, 
+		    0 => $elem->{$attr});
+	foreach $elem (@$tree) {
+	    $self->append_tree ($attr, $elem, $new_iter)}}
+    elsif (ref ($tree) eq 'HASH') {
+	$self->set ($self->append ($iter),
+		    0 => $tree->{$attr})}
+    else {
+	croak 'Invalid reference type '.ref($tree).'.'}
+    return undef;
+}
+
+
+
+######################################################################
 ##
 ##  Dimagso Menu Bar
 ##
@@ -651,8 +755,7 @@ sub define
     my $definition = shift;
 
     foreach my $def (@$definition) {
-	add_menuitem ($self, $def); }
- 
+	add_menuitem ($self, $def)}
    return undef;
 }
 
@@ -678,12 +781,10 @@ sub define
     my $self = shift;
     my $toolbar_definition = shift;
 
-    foreach my $toolbar_item (@$toolbar_definition)
-    {
+    foreach my $toolbar_item (@$toolbar_definition) {
 	my $item = Gtk2::ToolButton->new_from_stock ($toolbar_item->{stock});
 	$self->insert ($item, -1);
-	$item->signal_connect (clicked => $toolbar_item->{action});
-    }
+	$item->signal_connect (clicked => $toolbar_item->{action})}
     return undef;
 }
 
@@ -823,44 +924,6 @@ sub show
 
 
 ######################################################################
-##
-##  Simple List Store
-##
-
-package SimpleListStore;
-
-use strict;
-use Glib qw(TRUE FALSE);
-use Gtk2;
-use base qw(Gtk2::ListStore);
-use Carp;
-
-sub new
-{
-    my $class = shift;
-    my $types = shift;
-    my $self = Gtk2::ListStore->new (@$types);
-    bless $self, $class;
-    $self->append_rows (@_) if @_;
-    return $self;
-}
-
-sub append_rows
-{
-    my $self = shift;
-    my @rows = @_;
-
-    foreach my $row (@rows)
-    {
-	my $i = 0;
-	$self->set ($self->append, map {$i++, $_} @$row); 
-    }
-    return undef;
-}
-
-
-
-######################################################################
 
 package Dimagso::JobDialog;
 
@@ -942,9 +1005,75 @@ sub show
 
 
 ######################################################################
-##
-##  Object for the source icons
-##
+
+package Dimagso::RuleDialog;
+
+# The rule dialog displays a tree widget to define transformation rules.
+
+use strict;
+use Glib qw(TRUE FALSE);
+use Gtk2;
+use base qw(Gtk2::Dialog);
+
+use Data::Dumper;
+
+sub show
+{
+    my $class = shift;
+    my %args = @_;
+
+    my $self = Gtk2::Dialog->new_with_buttons
+	('Dimagso: Transformation Rules',
+	 Dimagso::window(),
+	 [qw(modal destroy-with-parent)],
+	 'gtk-ok'     => 'accept',
+	 'gtk-cancel' => 'reject');
+    bless $self, $class;
+
+    $self->set_default_response ('accept');
+    $self->set (resizable => TRUE); # FIXME: does not work
+
+    # Create scrolled window
+    my $sw = Gtk2::ScrolledWindow->new;
+    $sw->set_shadow_type ('etched-in');
+    $sw->set_policy ('automatic', 'automatic');
+    $sw->set_size_request (300, 300);
+    $sw->set_border_width(5);
+    $self->vbox->add ($sw);
+
+    # Create tree store
+    my $ts = Dimagso::TreeStore->new ('Glib::String');
+    foreach my $name (Dimagso::baptizer()->names) {
+	my $rule = Dimagso::baptizer()->source ($name);
+	#print Dumper ($rule);
+	$ts->append_tree (qw(value), $rule)}
+
+    # Create tree view
+    my $tv = Gtk2::TreeView->new ($ts);
+    my $tc = Gtk2::TreeViewColumn->new;
+    my $cr = Gtk2::CellRendererText->new;
+    $tc->pack_start ($cr, FALSE);
+    $tc->add_attribute ($cr, text => 0);
+    $tv->append_column ($tc);
+    $sw->add ($tv);
+
+    # Open dialog box
+    $self->vbox->show_all;
+    my $result = $self->run;
+
+    if ($result eq 'accept')
+    {
+	print 
+	    "OK\n";
+    }
+
+    $self->destroy;
+    return undef;
+}
+
+
+
+######################################################################
 
 package Dimagso::SourceIconView;
 
@@ -1172,10 +1301,8 @@ sub set_dates
     my $self = shift;
     
     $self->get_model->clear;
-    foreach ('any', @_)
-    {
-	$self->append_text ($_);
-    }
+    foreach ('any', @_) {
+	$self->append_text ($_)}
     $self->set_active (0);
 }
 
@@ -1680,16 +1807,16 @@ sub version { return $VERSION; }
 my $LOGGER = sub { };
 sub logger { return &$LOGGER(@_); }
 
-my $CONFIG = undef;
-sub config
-{
-    $CONFIG->set (@_) if @_;
-    return $CONFIG->tree;
-}
-my $WINDOW = undef;
+my $CONFIG = Dimagso::Config->new;
+sub config { $CONFIG->set (@_) if @_; return $CONFIG->tree; }
+
+my $WINDOW = Dimagso::MainWindow->new;
 sub window { return $WINDOW; }
 
-sub finish
+my $BAPTIZER = Dimagso::Sexpr->new;
+sub baptizer { return $BAPTIZER; }
+
+sub last_words
 {
     return sub {
 	print map { $_, "\n" } @_;
@@ -1701,23 +1828,21 @@ sub read_options
 {
     GetOptions 
 	('help' =>
-	 finish ('Dimagso version ' . version,
-		 'Options:',
-		 '  --help      Display usage',
-		 '  --version   Display version information'),
+	 last_words ('Dimagso version ' . version,
+		     'Options:',
+		     '  --help      Display usage',
+		     '  --version   Display version information'),
 	 'version' => 
-	 finish ('Dimagso version ', version),
+	 last_words ('Dimagso version ', version),
 	 'config-file' => \$OPTIONS->{config_file},
 	 'image-dir'   => \$OPTIONS->{image_dir},
 	) || die 'Can not read command line options.';
+    return undef;
 }
 
 sub read_config
 {
-    $CONFIG = Dimagso::Config->new 
-	(tree => {default => 1},
-	 filename => $OPTIONS->{config_file});
-    try { $CONFIG->read; }
+    try { $CONFIG->read (filename => options()->{config_file}); }
     catch Error with {
 	# Init configuration
 	warn "Initializing a new configuration";
@@ -1732,6 +1857,19 @@ sub read_config
 	$CONFIG->set ([qw (rules 0 ren)],  '');
     };
     return undef;
+}
+
+sub init_baptizer
+{
+    $BAPTIZER->define (concat  => sub { join ('', @_) },
+		       year    => sub { $_ = shift; $1 if /^([0-9]{4})/ },
+		       isodate => sub { $_ = shift; s/:/-/g; $1 if /^(\d{4}-\d{2}-\d{2})/ },
+		       dirify  => sub { $_ = shift; tr/ /_/; $_ });
+
+    my @keys = grep (/\d+/, keys %{config()->{rules}});
+    my %rules = map { $_ => config()->{rules}->{$_}->{rule} } @keys;
+
+    $BAPTIZER->parse (%rules);
 }
 
 sub change_counter_jobs_total
@@ -1789,7 +1927,6 @@ sub change_counter_jobs_per_year
 sub create_gui
 {
     # Create widgets
-    $WINDOW = Dimagso::MainWindow->new;
     my %widgets = (menubar            => Dimagso::MenuBar->new,
 		   toolbar            => Dimagso::ToolBar->new,
 		   dirchooser         => Dimagso::DirChooserButton->new,
@@ -1854,7 +1991,7 @@ sub create_gui
 			 action => sub { print "_Directories\n" } }
 		      ]},
 		{ label  => '_Rules',
-		  action => sub { print "Rules\n" } },
+		  action => sub { Dimagso::RuleDialog->show } },
 		{ label => '_Counter',
 		  menu  =>
 		      [{ label  => '_Total jobs',
@@ -1931,6 +2068,7 @@ use strict;
 
 Dimagso::read_options;
 Dimagso::read_config;
+Dimagso::init_baptizer;
 Dimagso::create_gui;
 
 #use Data::Dumper;
