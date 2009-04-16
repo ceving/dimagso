@@ -1,7 +1,7 @@
 ##
 ## Makefile for dimagso
 ##
-## Time-stamp: <2009-04-14 21:54:07 szi>
+## Time-stamp: <2009-04-16 17:06:39 szi>
 ##
 ## Copyright (C) 2009 Sascha Ziemann <ceving@gmail.com>
 ##
@@ -24,3 +24,12 @@ all:
 
 lines:
 	grep -v -e '^[[:space:]]*$$' dimagso | wc -l
+
+dimagso.ui: dimagso.glade
+	gtk-builder-convert $^ $@
+
+testbuilder.po: testbuilder.pl
+	xgettext -d testbuilder $^
+
+locale/de/LC_MESSAGES/testbuilder.mo: testbuilder.de.po
+	mkdir -p `dirname $@` && msgfmt -o $@ $^
