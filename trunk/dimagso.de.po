@@ -1,0 +1,38 @@
+msgid  "Hello world!"
+msgstr "Hallo Welt!"
+
+msgid  "Directory:"
+msgstr "Verzeichnis:"
+
+msgid  "Date:"
+msgstr "Datum:"
+
+msgid  "Hidden:"
+msgstr "Unsichtbar:"
+
+msgid  "Sort order:"
+msgstr "Reihenfolge:"
+
+msgid  "Select all"
+msgstr "Alles auswählen"
+
+msgid  "Select none"
+msgstr "Nichts auswählen"
+
+msgid  "Create new job"
+msgstr "Neuen Aufgabe anlegen"
+
+msgid  "Add to job"
+msgstr "Zur Aufgabe hinzufügen"
+
+msgid  "Progress:"
+msgstr "Fortschritt:"
+
+msgid  "Rename"
+msgstr "Umbenennen"
+
+msgid  "Copy"
+msgstr "Kopieren"
+
+msgid  "Move"
+msgstr "Verschieben"
